@@ -1,0 +1,431 @@
+# revosf2
+
+revosf2 converts Nintendo Wii sound archives (`.brsar`) to MIDI, SoundFont 2 and SFZ. Each
+sequence gets a MIDI file and a SoundFont containing its instruments. SFZ output includes the
+game's filters. SoundFont can only approximate them or leave them out (see
+[SFZ files](#sfz-files)).
+
+Drop archives onto `revosf2.exe` on Windows or `Revosf2.app` on macOS. Output goes in a folder
+beside each archive. From a terminal:
+
+```
+revosf2 [options] <archive.brsar> [<archive.brsar> ...]
+
+  --output DIR   write to DIR (one archive only)
+  --only REGEX   convert matching sequence names (for example --only BGM)
+  --loops N      repeat the main loop N times (default 1)
+                 MIDI loop markers are included for players that support them
+  --seed N       initial game random state (default 0x12345678)
+  --var N=V      set variable N (0-15 player, 16-31 global) to V before each
+                 sequence starts; repeat for more variables
+  --dol FILE     the game's main.dol, for the build of the game's sound library
+                 (default: sys/main.dol of the extracted disc that holds the
+                 archive)
+  --list         list sequences without converting
+  --quiet        print errors only
+  --version      show the version
+```
+
+Some sequences play nothing until the game sets one of their variables. `--var` sets one before
+each sequence starts. As in the game, player variables start at -1 and global variables at 0.
+Use `--only` to choose the sequences it applies to.
+
+The game's `main.dol` shows which build of the sound library plays the archive (see
+[Sequence playback](#sequence-playback)). Dolphin's "Extract Entire Disc" and wit put it in a
+`sys` folder beside the `files` folder that holds the archives. revosf2 finds it there by
+itself. `--dol` gives it for an archive kept elsewhere. Without it, an archive plays by its
+version, and revosf2 notes that.
+
+Files use the sequence names, with adjustments for Windows: forbidden characters and trailing
+dots or spaces become `_`, and reserved device names such as `CON` get an added `_`. If names
+differ only in ASCII letter case, later sequences get a sound-index suffix to avoid collisions
+on Windows and macOS. The same applies to a sequence named `samples`. That name would collide
+with the SFZ sample folder. The default output folder is `<archive name>_revosf2`; its name
+follows the same rules. Use `--output` to choose another location.
+
+The conversion is based on the WSF project's model of the Wii's sound library, NW4R SND, and of
+the CPU side of its audio system, AX. revosf2 is the Wii counterpart of citrusf2, the converter
+for Nintendo 3DS sound archives. revosf2's output side is citrusf2's code.
+
+## Downloads
+
+The Releases page has revosf2 for 64-bit Windows. On macOS and Linux, build it from source
+(see [Building](#building)).
+
+## Drag and drop
+
+- **Windows:** drop one or more `.brsar` files onto `revosf2.exe`. The console shows the results
+  and waits for Enter before closing.
+- **macOS:** drop archives onto `Revosf2.app`, or open it to choose files. The app shows the
+  results and offers to open the output folders. It wraps the command-line program because
+  Finder cannot drop files onto a bare executable. The app is included in the
+  [build](#building).
+
+An unreadable archive reports an error without stopping the others. If two inputs would use the
+same output folder, the second is skipped to protect the first's files. This can happen when
+names differ only in extension, or only in case on a case-insensitive filesystem. Filesystems on
+Windows and macOS are usually case-insensitive.
+
+## The conversion
+
+### Sequence playback
+
+A sequence (RSEQ) is bytecode, with variables, conditions, random arguments, calls, jumps, loops
+and tracks that start other tracks. revosf2 executes it and records the resulting notes and
+controllers. The performer follows WSF's model of NW4R SND's sequence player, including:
+
+- All commands and their variable, comparison, random and `if` forms.
+- Note lengths, damper, tie, `notewait off` and waits for sounding notes to finish. Note ends
+  are calculated frame by frame. AX starts a voice one frame after note-on. NW4R SND reads a
+  one-shot wave's end one frame after AX passes it. One-shot duration follows the pitch from the
+  note's sweep, track bend and pitch LFO, recalculated each frame. Envelopes start at -90.4 dB
+  and first advance at frame end; notes released or stopped before then are inaudible and
+  produce no MIDI note.
+- Tick scheduling in single-precision milliseconds, once per 3 ms sound frame. The game's
+  rounding occasionally places a tick in an adjacent frame.
+- The game's random generator, including its once-per-frame advance. Random choices therefore
+  depend on timing.
+- Main-loop detection and MIDI loop markers. The main loop belongs to the lowest-numbered track
+  that can still advance. A pass qualifies only if earlier tracks make no contribution. Tracks
+  waiting forever on held notes do not block this choice. A pass that changes nothing, such as
+  one that only polls or counts a variable, qualifies only while no other track changes the
+  sound or plays on. Setting a variable that another track reads counts as a change. A tie or
+  mono legato on a note below hearing (see below) changes nothing that can be heard. A track
+  that has sounded nothing and changed nothing for 10 seconds doesn't count as playing on.
+  Backward jumps to unvisited commands and passes without waits, such as random retries, are not
+  loops. A main loop in which no note starts isn't a loop either once every earlier note has
+  ended or is fading out. The sequence then ends with its last sound. The markers go on the
+  first pass that a player looping on them repeats as the game plays the next one: the same
+  notes at the same times, with the same settings and tempo. The first pass often differs. Setup
+  before the loop can land in its first tick. The game can keep a value from pass to pass. Later
+  passes may only tie again a note that the first pass strikes. If no pass so far repeats that
+  way but the next pass does, the performance plays that pass too. Otherwise the markers stay on
+  the first pass. They also stay there in a loop that draws random numbers. At the loop's start,
+  the MIDI file sends each controller, pitch, preset and tempo that the game gives back there
+  when the loop ends with another value. Without those events, a player that loops on the
+  markers would keep the loop end's value.
+
+NW4R SND changed how it plays sequences after its builds of 2006, and again in 2008. The game's
+`main.dol` shows which build it links. AX's microcode marks the builds of 2006: their AX moves
+0x120-byte parameter blocks, and every later one moves 0x140 bytes. The sound library's banner
+dates the later builds. revosf2 plays an archive as that build does. Without a `main.dol`, an
+archive of version 1.4 or later plays as the builds from June 2008, and an older archive as the
+builds of 2007. The archives of the builds of 2006 and 2007 have the same versions. Some games
+from 2008 also keep an archive of an older version, such as the archive of the Home Button menu.
+
+The builds from March 2008 add time-prefixed volume and pan moves, the envelope's hold,
+monophonic tracks, regions that ignore note-offs, key groups, a finer `sweep_pitch` and a tempo
+limited to 1023. The builds from June 2008 add the velocity range, the biquad filter and the
+envelope reset. The builds of 2006 count ticks in 416ths, and have no timebase. A tick there is
+0.16% shorter than at the usual 48 ticks a quarter note. They play stereo waves in dual mode. At
+the centre, that's 3 dB louder than balance mode. They also raise a pan of 1 to 2, stop a
+released note once its volume falls to 0, and have 64 voices.
+
+Short loops, such as repeating sound effects, run until the MIDI is at least 10 seconds long.
+Indefinitely held sounds are capped at 10 seconds after their last change. As in the WSF
+project, a note of 9,600 ticks or more that its track waits out counts as held. Games use such
+notes, minutes long at a typical tempo, for sounds that they stop themselves. The cap also
+covers a main loop longer than 10 seconds that ends with more than 10 seconds of no change and
+sounds only endless notes held with tie or mono. The game's next pass usually continues those
+notes. A sequence that finishes naturally ends with its last sound, including release. So does
+a sequence whose tracks all wait forever. A note counts as below hearing once its envelope has
+decayed 40 dB. A note that plays until its track releases it, such as a tie, ends where its
+envelope has decayed 60 dB. A held note in a sequence whose tracks all wait forever ends there
+too. If the sustain level stays above that, the note ends at 40 dB down. The game's channel
+goes on in silence. Performances stop after 15 minutes; one that has been silent for more than
+10 seconds by then ends with its last sound too.
+Tempo or timebase 0 stops sequence timing while notes keep playing; those notes finish normally,
+or use the same 10-second limit if held indefinitely. A track that never waits would hang the
+game; revosf2 stops it and reports it.
+
+### MIDI
+
+Each sequence track gets a MIDI track and channel of its own. Channel 10, reserved for drums in
+General MIDI, is allocated last. SoundFont synths use bank 128 for that channel. revosf2 copies
+that channel's presets to bank 128.
+
+MIDI output preserves tempo changes and uses at least 7680 ticks per quarter note, with an
+integer number of MIDI ticks per sequence tick. The game processes ticks in 3 ms sound frames,
+and AX applies their changes at the next frame boundary. revosf2 places events at the start of
+the frame containing each tick, rounded to the nearest MIDI tick. This shifts the whole sequence
+one frame earlier while preserving event spacing; at 120 BPM, rounding error is at most 1/30 ms.
+A moved event never crosses a loop marker. The loop's contents don't change. A sweep or
+portamento given a portamento time moves on in every frame, between ticks too. Its pitch bends
+go at the start of each frame. After its track closes, the sweep goes on while the note's
+release sounds. It also goes on after the sequence's last tick, at the last tempo.
+
+NW4R SND applies track settings to notes at frame end. A note therefore starts with its tick's
+final settings, and MIDI controller changes are written before notes at the same tick.
+
+| Game setting | MIDI output |
+|---|---|
+| Track volume, up to 127 | CC7 |
+| Track volume above 127 × second volume × main volume × sound volume, plus legato velocity changes without region volume | CC11; CC7 and CC11 both act squared, matching NW4R SND. Values are scaled for sequences exceeding MIDI's range (see [Differences from the game](#differences-from-the-game)). |
+| Track pan | CC10, mapped to the SoundFont pan law |
+| Pitch bend, sweep, portamento and legato key changes | Pitch bend, with RPN 0 range set per channel |
+| LFO depth | CC1 = depth / 2, mapped to vibrato or tremolo in the SoundFont |
+| Effect sends A and B | CC91 and CC93 (reverb and chorus) |
+| Immediate track silence | CC120 |
+| Low-pass filters that change during sounding notes | CC102, mapped to SoundFont cutoff by a modulator |
+| Track low-pass (0xd8), for SFZ | CC103 = 64 minus the argument; values <= 6 mean off |
+| Biquad filter (0xb4/0xb5, builds from 2008), for SFZ | CC104 = filter value; 0 means off |
+| Instrument and track envelope, LFO, initial pan and filter settings | Bank select (CC0) and program change |
+
+A MIDI channel can hold only one note per key. Repeated strikes that overlap, common in drums,
+get extra channels called layers, with matching controllers, up to the 16-channel limit.
+
+A MIDI channel has one set of controllers for all its notes. The game's notes each keep their
+settings. Notes that the game plays differently from the track's later notes therefore require
+channels of their own. Two kinds of note do: release tails that the track has detached, and
+notes still sounding when a note starts that sweeps, starts at a raised velocity or requires a
+level of its own. While such notes sound and channels remain, the track goes on to another
+channel. Each channel gets a MIDI track named after the sequence track. Layers get such tracks
+too.
+
+### SoundFont
+
+Each distinct combination of bank instrument and track settings becomes a preset. Instrument
+regions become zones with:
+
+- Key and velocity ranges resolved by NW4R SND's key and velocity tables.
+- The region's sample, root key, tuning, volume and pan.
+- Envelope parameters after track overrides. NW4R SND's attack is exponential in decibels; the
+  linear SoundFont attack is fitted to it at 0.55 of its duration. SoundFont decays and
+  releases fall 100 dB in 101.6 s at the slowest, and the game's slowest take up to six times
+  as long. Such a decay gets a longer hold, up to SoundFont's limit of 18 s: half the time by
+  which the game's decay reaches its sustain level later. The note is then as far above the
+  game's level at the end of the hold as below it when its decay reaches the sustain level.
+  Such a release plays at SoundFont's slowest. The SFZ files keep the game's times.
+- From the 2008 builds, the region's hold. A note of a key group releases the others through
+  their MIDI note-offs, at their release rates.
+- Loops repeated as needed to meet SoundFont padding rules: 8 samples before, at least 32
+  within, and 8 after. This preserves playback.
+- Continued playback for regions that ignore note-off. Their MIDI notes end when the game's
+  notes would fall silent, with release settings that also preserve decay after a repeated
+  strike.
+- Stereo waves in balance mode, with samples scaled to match. Balance mode keeps each channel on
+  its side, 3 dB below full level at the centre. The builds of 2006 have only dual mode.
+
+revosf2 reads RSAR archives of versions 1.0 to 1.4 and the RSEQ, RBNK, RWAR and RWAV files in
+them. A bank's waves are either an RWAR of RWAV files (RBNK 1.2) or raw samples described by the
+bank (RBNK 1.1). Supported wave encodings are PCM8, PCM16 and DSP-ADPCM. Files are found in the
+archive's groups. Truncated archives convert as far as their data goes, and the sequences they
+lack are reported.
+
+## SFZ files
+
+SoundFont has one two-pole low-pass filter per voice. That filter only approximates the game's
+one-pole track low-pass, and can't reproduce the high-pass and band-pass presets of the biquad
+filter. SFZ supports all of these filters. revosf2 also writes these SFZ files:
+
+- `sfz/<sequence>/Track <n>.sfz`: instruments for MIDI `Track <n>` and its layers, for each
+  active sequence track.
+- `sfz/samples/`: 16-bit WAV samples shared by all sequences in the archive. Stereo channels
+  are separate files, panned left and right.
+
+SFZ players ignore MIDI channels, and each file contains one instrument. Load the MIDI in a DAW
+and assign an SFZ player, such as sfizz, to each track with its matching file. Output targets
+sfizz 1.2.
+
+Presets use program change, plus bank select (CC0) when a sequence has more than 128 presets.
+Regions match the SoundFont, with these differences:
+
+- **Filters.** sfizz's `lpf_1p` matches AX's one-pole low-pass, coefficient for coefficient at
+  AX's 32 kHz. `lpf_2p`, `hpf_2p` and `bpf_2p` match the biquad presets of the builds from 2008
+  the same way. When both filters are active, they run in series. CC103/CC104 and SFZ curves map
+  the track's settings to cutoff, resonance and gain, including changes during notes. An
+  inactive low-pass stays at sfizz's maximum 20 kHz cutoff, attenuating 10 kHz by about 0.5 dB
+  and 16 kHz by 1 dB. SFZ has no biquad bypass like the game's value 0 or absent preset.
+  Instead, CC104 selects filtered or unfiltered regions at note-on, and that choice lasts for
+  the note. As in the game, the choice is the one that the note's sound frame ends with. Each
+  track uses its first biquad type. Later types are omitted and reported.
+- **Envelopes.** As in the game, sfizz decay and release fall linearly in dB: by 78.17 dB over
+  their specified duration. They use the game's time for that fall. Attack uses the SoundFont
+  fit described above.
+- **LFO.** SFZ uses a sine, matching the game, and supports pan LFO.
+- **Pan.** A curve maps CC10 to `(value - 64) / 64`, the SoundFont convention that the MIDI
+  output uses.
+- **Level.** SFZ region `volume` restores any gain lost when scaling MIDI CC11. Playback then
+  keeps the game's level.
+- **Controllers.** CC7, CC10 and CC11 act at once, without sfizz's default 10 ms smoothing. A
+  note whose track sets its volume or pan in the note's starting tick begins at that level and
+  pan.
+- **Loops.** sfizz crossfades the loop end with data before the loop start over at least 1 ms.
+  Samples include 4 ms of repeated loop data before the start. The crossfade is then inaudible.
+
+Two sfizz 1.2.3 quirks affect playback:
+
+- **Sample rate.** Loading a file configures its filters for 48 kHz. A subsequent sample-rate
+  change corrects them. At other rates, load files before setting the rate. `sfizz_render` and
+  `sfizz_jack` set it first; `sfizz_render` defaults to 48 kHz unless told otherwise.
+- **Streaming.** During offline rendering, streamed samples can fall silent after their
+  preloaded portion. The files request full loading with `hint_ram_based=1`. sfizz prints
+  "Unsupported value for hint_stealing: 1" for this; the message is harmless.
+
+## Differences from the game
+
+revosf2 reports approximations for each sequence. Some behavior cannot be represented exactly
+in MIDI, SoundFont or SFZ:
+
+- **Per-note pitch.** Game sweeps, portamento and legato key changes affect individual notes.
+  MIDI pitch bend affects the whole channel. A note that sweeps beside another note still
+  sounding goes on another channel (see "MIDI").
+- **Legato.** Tie and mono normally continue the existing note. Pitch bend gives the key changes,
+  and CC11 the velocity changes. A note that legatos take above its velocity starts at the
+  highest velocity they reach. CC11 lowers it until then. That works while the instrument plays
+  the same region at that velocity. Past that, CC11 goes above 127 (see "Volume limits"). CC11
+  would lower any other note on the channel too. Beside another note's release, such a note goes
+  on another channel (see "MIDI"). When no channel is left, a rising legato requires a new MIDI
+  note. A changed envelope or LFO preset always does. The new note restarts the sample and
+  envelope. The game would continue them.
+- **Attack.** The linear SoundFont attack rises sooner than the game's. It's louder for the
+  first quarter of the attack, by up to tens of decibels at its very start. A note that the game
+  releases during its attack gets a longer attack of its own preset. That attack reaches the
+  game's level when the note is released. The release then starts at the game's level.
+- **Detached notes.** Toggling tie or mono, muting with release or restarting a track detaches
+  its sounding notes. They finish releasing with their old settings. In MIDI, they keep those
+  settings on a channel of their own (see "MIDI"). When no channel is left, they stay on the
+  track's and receive later changes. Changes affecting a detached note above -40 dB are
+  reported.
+- **Combined pan.** NW4R SND adds region pan, track initial pan and track pan before applying
+  its pan law. Synths receive track pan separately through CC10 and combine it with zone pan by
+  their law.
+- **Pan curves and modes.** revosf2 always uses the default curve. In the game, a track pan on a
+  stereo wave in balance mode changes the level of each side. revosf2 pans the channels as in
+  dual mode instead. Both are reported.
+- **LFO settings.** Notes keep the speed, range, type and delay their track has at the end of
+  their note-on's tick. That's when the game first gives them to the note. The game updates
+  these during playback, and a note that plays its LFO with later settings is reported. Depth
+  changes work through CC1.
+- **Deep tremolo.** The game's volume LFO can lower a note as far as silence but raise it by no
+  more than 6 dB. The SoundFont and SFZ LFOs swing as far up as down. A volume LFO deeper than
+  6 dB is kept to 6 dB and reported. It then dips less than in the game.
+- **SoundFont filters.** The two-pole low-pass matches the biquad low-pass of the builds from
+  2008. It approximates the one-pole track filter: it passes slightly more just above cutoff and
+  less in the top octave, and its slope is twice as steep. Cutoffs are fitted by
+  `tools/filter_tables.py`. The biquad's high-pass and band-passes are omitted and reported. Two
+  active low-passes use the lower cutoff. SFZ has all these filters.
+- **Routing.** Surround pan, main send and effect send C are omitted. Pan LFO is omitted from
+  SoundFont but included in SFZ. Effect sends A and B become CC91 and CC93. Synths play them as
+  reverb and chorus. In the game, a send reaches whatever effect the game puts on that bus in
+  that scene: any of NW4R SND's ReverbHi, ReverbStd, Chorus and Delay, or none.
+- **Volume limits.** NW4R SND never plays a note above full level, however high its volumes go.
+  Track volume, second volume and main volume can reach 255. MIDI CC7 holds track volume up
+  to 127. CC11 holds the rest, limited so that a note at full velocity stays at full level.
+  CC11 also stops at 127. If necessary, all CC11 values are scaled equally. That keeps the
+  balance between tracks and lowers the sequence's level. revosf2 reports the reduction. SFZ
+  restores the MIDI gain.
+- **AX output.** AX resamples with 4-tap filters whose coefficients depend on the pitch ratio.
+  It darkens a voice playing more than 4/3 of its samples per output sample: a 44.1 kHz sample
+  at its recorded pitch loses about 3 dB at 9 kHz. Synths interpolate differently. High
+  frequencies differ as a result. AX also runs a compressor on the final mix. While the mix
+  would pass full scale, the compressor turns the whole mix down. A synth plays such a passage
+  louder, or clips it.
+- **Voice limits.** AX has 96 voices, or 64 in the builds of 2006; synths usually have more.
+  With all of them in use, the game gives a new note the voice of the lowest priority. AX also
+  stops the voices of the lowest priority when a frame would take more DSP time than AX allows.
+  revosf2 plays every note to its end. If a track starts more notes in one tick than AX has
+  voices, revosf2 keeps the first ones. The game keeps the newest. After as many legatos in a
+  tick, the MIDI note continues with its existing preset and no gain above its starting level.
+  Legatos that would otherwise require a new note are reported.
+
+SoundFont output follows the specification and targets FluidSynth. Player differences remain:
+
+- **Pan.** Pans are mapped from NW4R SND's square-root law to FluidSynth's sin/cos law.
+  TinySoundFont uses a square-root law, and its pans come out slightly narrower.
+- **Envelopes.** Times follow the specification's 100 dB range. FluidSynth uses 96 dB. Decays
+  and releases then fall 4% slower in decibels, and sustain levels are 4% shallower: -11.9 dB
+  plays as -11.4 dB. FluidSynth also slows any release faster than 15.6 ms (-7200 timecents)
+  to that time.
+- **Attenuation.** Like E-mu hardware, FluidSynth applies 0.4 of a zone's initial attenuation.
+  The specification applies all of it. A region at volume 64 therefore plays 2.4 dB below one
+  at 127 in FluidSynth, rather than 6 dB.
+- **Low-pass level.** In FluidSynth, a note through the SoundFont's version of the biquad
+  low-pass plays 0.85 dB below an unfiltered one. The game's filter lowers it by 0.5 dB.
+- **Pitch.** FluidSynth rounds pitch down to whole cents. Fractional bends can be almost a cent
+  flat. A long note's loop can then drift by up to 35 ms per minute against the game. The
+  beating of notes detuned by less than a cent changes too.
+- **Modulators.** TinySoundFont lacks SoundFont modulator support. CC1 LFO depth and CC102
+  filter changes have no effect there.
+- **Tempo changes.** FluidSynth rounds its position to the nearest MIDI tick at each change
+  and restarts its clock there. This can advance playback by half a tick per change: 1/30 ms
+  at 120 BPM with 7680 ticks per quarter note. TinySoundFont rounds tempo-change times down to
+  milliseconds. Its playback runs ahead by about half a millisecond per change on average.
+- **Note timing.** FluidSynth applies MIDI events at the start of each 64-sample render block.
+  Notes can start up to 64 samples late, about 1.5 ms at 44.1 kHz. Notes that play the same
+  wave at the same pitch add up differently when their start times move.
+- **Short notes.** FluidSynth holds every note for at least 10 ms (`synth.min-note-length`).
+  Shorter notes therefore sound longer than in the game.
+
+## Building
+
+Requires C++20 and CMake 3.20 or later, with no other build dependencies. CI builds and tests
+Windows/MSVC x64, macOS/Apple Clang on Apple Silicon and Intel, and Linux/GCC and Clang x64.
+
+- **Windows:** install Visual Studio 2022 or later with "Desktop development with C++",
+  including CMake. Use Developer PowerShell or Developer Command Prompt.
+- **macOS:** install Xcode command line tools (`xcode-select --install`) and CMake
+  (`brew install cmake` or the installer from cmake.org).
+- **Linux:** install GCC or Clang and CMake. On Debian/Ubuntu:
+  `sudo apt install build-essential cmake`.
+
+From the repository root:
+
+```sh
+cmake -S . -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release
+```
+
+The executable is `build/revosf2`, or `build/Release/revosf2.exe` with Visual Studio. Xcode and
+other multi-configuration generators also use `build/Release`. MSVC links the runtime
+statically. The executable requires no runtime DLLs. CI uploads the Windows executable as an
+artifact. macOS builds also produce `build/Revosf2.app`, containing a copy of the program; you
+can move the app elsewhere.
+
+C++ formatting uses clang-format with the repository's `.clang-format`.
+
+## Tests and tools
+
+`ctest` runs unit tests without game data. Coverage includes:
+
+- DSP-ADPCM and PCM16 decoding, including NW4R SND's two-channel limit and ADPCM loop
+  addresses.
+- Truncated files, missing blocks, invalid bank and wave references, other platforms' archives,
+  and names containing control characters, line breaks or invalid UTF-8.
+- Group file lookup, banks of both versions, partial files, fallback to complete copies, and
+  groups missing from truncated archives.
+- Sequence start offsets, loop detection, held loops, the time limit, tie and mono, legato
+  gain scaling, full-level limits, unheard notes, one-shot completion, tick rounding, unusual
+  arguments, stopped timing, variables, voice limits and approximation reports.
+- The commands and region settings of the 2008 builds against the older ones.
+- Envelope conversion, pitch ratios, LFO, pan, balance mode, SoundFont and SFZ filters and loop
+  unrolling.
+- SoundFont and MIDI output checked by independent readers, SFZ and WAV output and file naming.
+
+Other checks and tools:
+
+- `-DREVOSF2_TEST_ARCHIVE=path/to/archive.brsar` adds a test that converts every sequence in
+  that archive and checks each output file with independent readers.
+- `tools/check_sf2.py` checks SoundFont structure using Python alone.
+- `tools/filter_tables.py` derives the SoundFont and SFZ filter tables in `src/filter.cpp` from
+  AX's filter formulas and the biquad presets' coefficients in a locally supplied Wii Music
+  `main.dol`. Requires Python 3 and numpy.
+- `tools/compare_with_wsf.py` compares FluidSynth renders of converted files with WSF renders of
+  the same sequences. Those renders run WSF's model of the sound library on an emulated DSP. It
+  removes MIDI tempo changes while preserving event times to avoid FluidSynth's cumulative
+  rounding. Reports cover timing, level, spectrum and stereo balance; `--timeline` adds
+  per-second results. Requires Python 3, numpy, FluidSynth, WSF's `wsfrip` and `wsfplay`, and
+  the game's `main.dol`, for AX's microcode and the sound library's build:
+  `tools/compare_with_wsf.py --dol main.dol --wsf <WSF's build folder> <revosf2> <archive.brsar>`.
+  Use `--sfizz <libsfizz>` to render SFZ instead. Each MIDI track then plays through its
+  sequence track's SFZ file.
+
+These development tools require game files supplied separately; neither revosf2 nor WSF
+distributes those files. Normal conversion requires only the input `.brsar` archive.
+
+## Licence
+
+[MIT](LICENSE). The output code is adapted from the MIT-licensed citrusf2. The model of the
+sound library follows the MIT-licensed WSF project. The licence includes both projects'
+copyright lines too. Game data is not covered by this licence.
