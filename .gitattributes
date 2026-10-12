@@ -1,3 +1,2 @@
-# Normalize text line endings. Keep Python shebangs usable on Unix after a Windows checkout.
+# Text files are stored with LF line endings.
 * text=auto
-*.py text eol=lf

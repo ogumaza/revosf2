@@ -1,152 +1,94 @@
 // SPDX-License-Identifier: MIT
 
-// NW4R SND's build, from an archive's version or a game's main.dol (see snd_build.h).
+// NW4R SND's build, from a game's main.dol, and the settings that it plays with (see snd_build.h).
 
 #include "snd_build.h"
 
+#include <array>
 #include <cstddef>
-#include <string_view>
 #include <system_error>
+
+#include "ntdlib/nwsnd/console.h"
+#include "ntdlib/nwsnd/tables.h"
+#include "ntdlib/nwsnd/util.h"
+#include "ntdlib/sequence_export/consoles.h"
+#include "ntdlib/sequence_export/filter.h"
 
 namespace revosf2
 {
 
+namespace fs = std::filesystem;
+namespace nwsnd = ntdlib::nwsnd;
+namespace sequence_export = ntdlib::sequence_export;
+
 namespace
 {
 
-namespace fs = std::filesystem;
+// The 0xd8 arguments that leave the track low-pass on: 0 to 57 in every build (see sequence_export::LowPassIndex).
+constexpr std::size_t kLowPassArguments = 58;
 
-// A DOL's header: the file offsets (0x00), load addresses (0x48) and sizes (0x90) of its 7 text and 11 data sections.
-constexpr std::size_t kDolHeaderSize = 0x100;
-constexpr std::size_t kDolSections = 18;
-
-// AX's microcode fills the DSP's instruction RAM: 4096 words.
-constexpr std::size_t kMicrocodeBytes = 0x2000;
-
-uint16_t Be16(std::span<const uint8_t> data, std::size_t at)
+// The track low-pass of the builds from November 2008, for each 0xd8 argument that leaves it on.
+struct LowPassTables
 {
-    return static_cast<uint16_t>(data[at] << 8 | data[at + 1]);
+    std::array<uint16_t, kLowPassArguments> cutoff;    // SoundFont cutoff, in absolute cents
+    std::array<int16_t, kLowPassArguments> sfz_cutoff; // SFZ cutoff (see sequence_export::SfzLowPassCutoff)
+    std::array<uint16_t, kLowPassArguments> hz;        // the game's cutoff
+};
+
+// The build of November 20 2008 takes the cutoff from a table (Util::CalcLpfFreq). The table is
+// nwsnd::tables::kLpfFreq, and the arithmetic is the Wii U's (nwsnd::LpfFreqIndex). Earlier builds compute the cutoff
+// (nwsnd::RevolutionPolicy::LpfFreq). Fitted at each of kLpfFreq's cutoffs, the Wii's one-pole (AXGetLpfCoefs) gives
+// the Wii U's SoundFont and SFZ cutoffs. These builds therefore use the Wii U's tables.
+LowPassTables November2008LowPass()
+{
+    LowPassTables tables{};
+    for (std::size_t argument = 0; argument < kLowPassArguments; ++argument)
+    {
+        // The track gives (argument - 64) / 64, and the channel adds 1.
+        const float value = static_cast<float>(static_cast<int>(argument) - 0x40) * 0.015625f + 1.0f;
+        const auto step = static_cast<std::size_t>(nwsnd::LpfFreqIndex<nwsnd::CafePolicy>(value));
+        tables.cutoff[argument] = sequence_export::kCafeFilters.low_pass_cutoff[step];
+        tables.sfz_cutoff[argument] = sequence_export::kCafeFilters.sfz_low_pass_cutoff[step];
+        tables.hz[argument] = nwsnd::tables::kLpfFreq[step];
+    }
+
+    return tables;
 }
 
-uint32_t Be32(std::span<const uint8_t> data, std::size_t at)
+// The Wii's filter tables with the low-pass of `low_pass`.
+sequence_export::FilterTables WithLowPass(const LowPassTables& low_pass)
 {
-    return static_cast<uint32_t>(Be16(data, at)) << 16 | Be16(data, at + 2);
+    sequence_export::FilterTables filters = sequence_export::kRevolutionFilters;
+    filters.low_pass_cutoff = low_pass.cutoff;
+    filters.sfz_low_pass_cutoff = low_pass.sfz_cutoff;
+    filters.low_pass_hz = low_pass.hz;
+
+    return filters;
 }
 
-// True if `code` starts as AX's microcode does: two NOPs at the reset vector, then seven jumps (0x029F) to the top of
-// instruction RAM (0x0Fxx).
-bool IsAxVectors(std::span<const uint8_t> code)
+// The filter tables of the builds from November 2008.
+const sequence_export::FilterTables& November2008Filters()
 {
-    if (Be32(code, 0) != 0)
-    {
-        return false;
-    }
+    static const LowPassTables kLowPass = November2008LowPass();
+    static const sequence_export::FilterTables kFilters = WithLowPass(kLowPass);
 
-    for (std::size_t i = 0; i < 7; i++)
-    {
-        const std::size_t jump = 4 + 4 * i;
-        if (Be16(code, jump) != 0x029f || (Be16(code, jump + 2) & 0xff00) != 0x0f00)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-// True for the microcode of AX of October 2006. It transfers 0x120-byte parameter blocks (`si @DSBL, #0x120`), and
-// never 0x140-byte ones as every later AX does.
-bool TransfersOldBlocks(std::span<const uint8_t> code)
-{
-    bool old_blocks = false;
-    bool new_blocks = false;
-    for (std::size_t at = 0; at + 4 <= code.size(); at += 2)
-    {
-        if (Be16(code, at) == 0x16cb)
-        {
-            old_blocks = old_blocks || Be16(code, at + 2) == 0x0120;
-            new_blocks = new_blocks || Be16(code, at + 2) == 0x0140;
-        }
-    }
-
-    return old_blocks && !new_blocks;
-}
-
-// The date in NW4R SND's banner, as YYYYMMDD, or 0 without one. The banner reads like "<< NW4R    - SND \tfinal
-// build: Jun  8 2007 11:17:15 (0x4199_60831) >>", with the date in the form of C's __DATE__.
-uint32_t BannerDate(std::span<const uint8_t> dol)
-{
-    const std::string_view text(reinterpret_cast<const char*>(dol.data()), dol.size());
-    const std::size_t banner = text.find("<< NW4R    - SND ");
-    const std::size_t build = banner == std::string_view::npos ? banner : text.find("build: ", banner);
-    if (build == std::string_view::npos || build - banner > 32 || text.size() - build < 18)
-    {
-        return 0;
-    }
-
-    constexpr std::string_view kMonths = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    const std::string_view date = text.substr(build + 7, 11);
-    const std::size_t month = kMonths.find(date.substr(0, 3));
-    auto digit = [&date](std::size_t i) -> int
-    {
-        return date[i] == ' ' ? 0 : (date[i] >= '0' && date[i] <= '9' ? date[i] - '0' : -1);
-    };
-    for (const std::size_t i : {4u, 5u, 7u, 8u, 9u, 10u})
-    {
-        if (digit(i) < 0 || (i >= 7 && date[i] == ' '))
-        {
-            return 0;
-        }
-    }
-    if (month == std::string_view::npos || month % 3 != 0)
-    {
-        return 0;
-    }
-
-    const int year = digit(7) * 1000 + digit(8) * 100 + digit(9) * 10 + digit(10);
-    const int day = digit(4) * 10 + digit(5);
-    return static_cast<uint32_t>(year * 10000 + (static_cast<int>(month) / 3 + 1) * 100 + day);
+    return kFilters;
 }
 
 } // namespace
 
-SndBuild BuildOfVersion(uint16_t version)
-{
-    SndBuild build;
-    build.date = version >= 0x0104 ? 20080620 : 0;
-
-    return build;
-}
-
 std::optional<SndBuild> ReadSndBuild(std::span<const uint8_t> dol)
 {
-    if (dol.size() < kDolHeaderSize)
+    const std::optional<ntdlib::Microcode> microcode = ntdlib::FindMicrocode(dol, {.skip_damaged_sections = true});
+    if (!microcode)
     {
         return std::nullopt;
     }
 
-    // AX's microcode is data in one of the sections, on an 8-byte boundary.
-    for (std::size_t s = 0; s < kDolSections; s++)
-    {
-        const std::size_t offset = Be32(dol, 4 * s);
-        const std::size_t size = Be32(dol, 0x90 + 4 * s);
-        if (size == 0 || offset < kDolHeaderSize || offset > dol.size() || size > dol.size() - offset)
-        {
-            continue;
-        }
+    SndBuild build = ntdlib::FindSndBuild(dol, {.check_day = true});
+    build.october_2006 = ntdlib::IdentifyBuild(*microcode) == ntdlib::AxBuild::kOctober2006;
 
-        const std::span<const uint8_t> section = dol.subspan(offset, size);
-        for (std::size_t at = 0; at + kMicrocodeBytes <= section.size(); at += 8)
-        {
-            const std::span<const uint8_t> code = section.subspan(at, kMicrocodeBytes);
-            if (IsAxVectors(code))
-            {
-                return SndBuild{BannerDate(dol), TransfersOldBlocks(code)};
-            }
-        }
-    }
-
-    return std::nullopt;
+    return build;
 }
 
 std::optional<fs::path> FindMainDol(const fs::path& archive)
@@ -168,6 +110,22 @@ std::optional<fs::path> FindMainDol(const fs::path& archive)
     }
 
     return std::nullopt;
+}
+
+bool SinceNovember2008(const SndBuild& build)
+{
+    return build.date >= 20081120;
+}
+
+sequence_export::Settings SettingsFor(const SndBuild& build)
+{
+    sequence_export::Settings settings = sequence_export::RevolutionSettings(build);
+    if (SinceNovember2008(build))
+    {
+        settings.filters = &November2008Filters();
+    }
+
+    return settings;
 }
 
 } // namespace revosf2

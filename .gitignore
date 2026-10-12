@@ -3,8 +3,6 @@
 /out/
 /cmake-build-*/
 *_revosf2/
-__pycache__/
-*.pyc
 .DS_Store
 .vscode/
 .idea/
