@@ -6,7 +6,8 @@ game's filters. SoundFont can only approximate them or leave them out (see
 [SFZ files](#sfz-files)).
 
 Drop archives onto `revosf2.exe` on Windows or `Revosf2.app` on macOS. Output goes in a folder
-beside each archive. From a terminal:
+beside each archive. An input can also be a whole game: a disc image, an extracted disc or a
+WiiWare title (see [Games](#games)). From a terminal:
 
 ```
 revosf2 [options] <archive.brsar> [<archive.brsar> ...]
@@ -19,8 +20,8 @@ revosf2 [options] <archive.brsar> [<archive.brsar> ...]
   --var N=V      set variable N (0-15 player, 16-31 global) to V before each
                  sequence starts; repeat for more variables
   --dol FILE     the game's main.dol, for the build of the game's sound library
-                 (default: sys/main.dol of the extracted disc that holds the
-                 archive)
+                 (default: the game's main.dol when the input is a game, or
+                 sys/main.dol of the extracted disc that holds the archive)
   --list         list sequences without converting
   --quiet        print errors only
   --version      show the version
@@ -33,8 +34,9 @@ Use `--only` to choose the sequences it applies to.
 The game's `main.dol` shows which build of the sound library plays the archive (see
 [Sequence playback](#sequence-playback)). Dolphin's "Extract Entire Disc" and wit put it in a
 `sys` folder beside the `files` folder that holds the archives. revosf2 finds it there by
-itself. `--dol` gives it for an archive kept elsewhere. Without it, an archive plays by its
-version. revosf2 notes that for an archive older than version 1.4.
+itself. A game given as the input provides its `main.dol` too. A WiiWare title provides its
+main program. `--dol` gives it for an archive kept elsewhere. Without it, an archive plays by
+its version. revosf2 notes that for an archive older than version 1.4.
 
 Files use the sequence names, with adjustments for Windows: forbidden characters and trailing
 dots or spaces become `_`, and reserved device names such as `CON` get an added `_`. If names
@@ -46,6 +48,36 @@ follows the same rules. Use `--output` to choose another location.
 The conversion models the Wii's sound library, NW4R SND, and the CPU side of its audio system,
 AX.
 
+## Games
+
+An input can be a whole game. revosf2 then converts each sound archive in the game the way it
+converts an archive given on its own. Each archive's files go in a folder named after the
+archive, inside `<game name>_revosf2` beside the game, or inside the folder that `--output`
+gives. Where two archives in a game have the same name, their folders also take the names of
+the folders above the archives. The game's `main.dol`, or a WiiWare title's main program, shows
+the build of the sound library.
+
+Some games keep their sound archives inside CRI Middleware's CPK archives (`.cpk`). A CPK
+stores each file as it is or compresses it with CRILAYLA. revosf2 finds the sound archives in
+both forms. It doesn't search a CPK that lists its files by number and not by name.
+
+revosf2 reads three kinds of game:
+
+- **Extracted discs:** a folder with `sys/main.dol` and `files/`, directly or in a `DATA`
+  folder. Dolphin's "Extract Entire Disc" and wit extract a disc that way.
+- **WiiWare titles:** a folder with the title's TMD (`.tmd`) and its decrypted contents
+  (`.app`). A WAD unpacker that decrypts the contents writes such a folder. So does Dolphin:
+  Tools > Install WAD installs a title in Dolphin's NAND, under `Wii/title/00010001` in
+  Dolphin's user folder. A WAD holds its contents encrypted. revosf2 doesn't read a WAD.
+- **Disc images:** ISO, WBFS and WDF images whose game partition is stored decrypted. NKit
+  images store it that way. revosf2 can't decrypt a partition. It doesn't read RVZ, WIA, GCZ or
+  CISO images either. For such an image, extract the disc with Dolphin: right-click the game
+  and choose Properties. On the Filesystem tab, right-click the disc and choose Extract Entire
+  Disc. Then convert the folder that Dolphin extracted it to.
+
+Give games on the command line, or drop them onto `revosf2.exe` on Windows. `Revosf2.app` on
+macOS takes only `.brsar` files.
+
 ## Downloads
 
 The Releases page has revosf2 for 64-bit Windows. On macOS on Apple Silicon, build it from
@@ -53,12 +85,12 @@ source (see [Building](#building)).
 
 ## Drag and drop
 
-- **Windows:** drop one or more `.brsar` files onto `revosf2.exe`. The console shows the results
-  and waits for Enter before closing.
+- **Windows:** drop one or more `.brsar` files onto `revosf2.exe`, or games: their folders or
+  disc images. The console shows the results and waits for Enter before closing.
 - **macOS:** drop archives onto `Revosf2.app`, or open it to choose files. The app shows the
   results and offers to open the output folders. It wraps the command-line program because
   Finder cannot drop files onto a bare executable. The app is included in the
-  [build](#building).
+  [build](#building). It takes only `.brsar` files. Convert games from a terminal.
 
 An unreadable archive reports an error without stopping the others. If two inputs would use the
 same output folder, the second is skipped to protect the first's files. This can happen when
@@ -308,13 +340,20 @@ in MIDI, SoundFont or SFZ:
   more than 6 dB. The SoundFont and SFZ LFOs swing as far up as down. A volume LFO deeper than
   6 dB is kept to 6 dB and reported. It then dips less than in the game. The game also never
   takes a note above full level. While the note's envelope is at full level, the upper half of
-  the swing changes nothing. The SoundFont and SFZ LFOs raise the level there. revosf2 reports
-  those notes.
+  the swing changes nothing. The SoundFont and SFZ LFOs can't stop at full level. A note that
+  the game holds at full level gets a preset whose smaller swing and lower level are fitted to
+  the game's level. A note at full level throughout swings half as far around a level that is
+  lower by the swing over pi. revosf2 reports those notes.
 - **SoundFont filters.** The two-pole low-pass matches the biquad low-pass of the builds from
   2008. It approximates the one-pole track filter: it passes slightly more just above cutoff and
-  less in the top octave, and its slope is twice as steep. Cutoffs are fitted by ntdlib's
-  `tools/sequence_export/filter_tables.py`. The biquad's high-pass and band-passes are omitted
-  and reported. Two active low-passes use the lower cutoff. SFZ has all these filters.
+  less in the top octave, and its slope is twice as steep. ntdlib's
+  `tools/sequence_export/filter_tables.py` fits a cutoff to the one-pole's curve. A zone keeps
+  that cutoff where its sample plays within 1 dB of the game's level at every key that the
+  sequence plays. Otherwise the zone takes the cutoff at which FluidSynth passes as much of the
+  sample's power as the game's filter. That cutoff can follow the key. The sample then plays at
+  the game's level. Its spectrum can differ more from the game's. The biquad's high-pass and
+  band-passes are omitted and reported. Two active low-passes use the lower cutoff. SFZ has all
+  these filters.
 - **Routing.** Surround pan, main send and effect send C are omitted. Pan LFO is omitted from
   SoundFont but included in SFZ. Effect sends A and B become CC91 and CC93. Synths play them as
   reverb and chorus. In the game, a send reaches whatever effect the game puts on that bus in
@@ -331,10 +370,13 @@ in MIDI, SoundFont or SFZ:
   reports the reduction. SFZ restores the MIDI gain.
 - **AX output.** AX resamples with 4-tap filters whose coefficients depend on the pitch ratio.
   It darkens a voice playing more than 4/3 of its samples per output sample: a 44.1 kHz sample
-  at its recorded pitch loses about 3 dB at 9 kHz. Synths interpolate differently. High
-  frequencies differ as a result. AX also runs a compressor on the final mix. While the mix
-  would pass full scale, the compressor turns the whole mix down. A synth plays such a passage
-  louder, or clips it.
+  at its recorded pitch loses about 3 dB at 9 kHz. Synths interpolate differently. The zones and
+  SFZ regions of notes that play more than one sample per output sample therefore take
+  key-tracked low-passes fitted to AX's filters. In FluidSynth, the fits leave an error of about
+  1.3 dB over the top two octaves. A SoundFont zone holds one low-pass. A zone that also has the
+  track filter's fitted cutoff takes the lower of the two at its original key. AX also runs a
+  compressor on the final mix. While the mix would pass full scale, the compressor turns the
+  whole mix down. A synth plays such a passage louder, or clips it.
 - **Voice limits.** AX has 96 voices, or 64 in the builds of 2006; synths usually have more.
   With all of them in use, the game gives a new note the voice of the lowest priority. AX also
   stops the voices of the lowest priority when a frame would take more DSP time than AX allows.
@@ -345,6 +387,11 @@ in MIDI, SoundFont or SFZ:
 
 SoundFont output follows the specification and targets FluidSynth. Player differences remain:
 
+- **Level.** FluidSynth runs the SoundFont low-pass filter on every note. That includes notes
+  whose filter is open. The filter divides the level by the square root of its Q. FluidSynth
+  converts the default resonance of 0 dB to a Q of 0.707. Every note therefore plays 1.5 dB
+  louder than the SoundFont specifies. Multiplying FluidSynth's gain by 0.84 gives the specified
+  level.
 - **Pan.** Pans are mapped from NW4R SND's square-root law to FluidSynth's sin/cos law.
   TinySoundFont uses a square-root law, and its pans come out slightly narrower.
 - **Envelopes.** Times follow the specification's 100 dB range. FluidSynth uses 96 dB. Decays
@@ -407,10 +454,11 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 ## Tests and tools
 
 `ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
-`main.dol` beside an archive, and the low-pass of the builds from November 2008. It checks that
-the program reports its version, and rejects a variable that the game doesn't have and a
-`--dol` file without AX's microcode. The conversion's unit tests are in the seqlib and ntdlib
-libraries. They run on synthetic files, without game data.
+`main.dol` beside an archive, and the low-pass of the builds from November 2008. It checks which
+inputs are games, the messages for disc images that revosf2 can't read, and the output folders
+of games. It checks that the program reports its version, and rejects a variable that the game
+doesn't have and a `--dol` file without AX's microcode. The conversion's unit tests are in the
+seqlib and ntdlib libraries. They run on synthetic files, without game data.
 
 Other checks and tools:
 
@@ -421,10 +469,11 @@ Other checks and tools:
   (`sys/main.dol` in the game's files). Requires Python 3 and numpy.
 
 These development tools require game files supplied separately. revosf2 doesn't distribute those
-files. Normal conversion requires only the input `.brsar` archive.
+files. Normal conversion requires only the input: a `.brsar` archive or a game.
 
 ## Licence
 
 revosf2 is under the [MIT](LICENSE) licence. The libraries it builds on, seqlib, xsflib and
-ntdlib, are under the MIT licence too. `THIRD-PARTY-NOTICES.md` gives their licence texts. Game
+ntdlib, are under the MIT licence too. The one exception is a table in ntdlib made from Unicode's
+data. It's under the Unicode License v3. `THIRD-PARTY-NOTICES.md` gives their licence texts. Game
 data is not covered by this licence.
