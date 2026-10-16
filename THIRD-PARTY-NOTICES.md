@@ -8,7 +8,7 @@ from Unicode" below).
 |---|---|---|
 | seqlib, Copyright (c) 2026 the seqlib authors | MIT (`externals/seqlib/LICENSE`) | In `externals/seqlib`, a submodule, compiled into revosf2: the MIDI, SoundFont 2 and SFZ files and their samples. |
 | xsflib, Copyright (c) 2026 the xsflib authors | MIT (`externals/xsflib/LICENSE`) | In `externals/xsflib`, a submodule, compiled into revosf2: bounds-checked reads of binary files, ASCII and UTF-8 names, the Windows version resource and the macOS droplet app. |
-| ntdlib, Copyright (c) 2026 the ntdlib authors | MIT (`externals/ntdlib/LICENSE`) | In `externals/ntdlib`, a submodule, compiled into revosf2: the readers of games and CPK archives, the sound archive and wave readers, the detection of the game's sound builds, the sequence player, the conversion of instruments and filters, and the command line's frame. |
+| ntdlib, Copyright (c) 2026 the ntdlib authors | MIT (`externals/ntdlib/LICENSE`) | In `externals/ntdlib`, a submodule, compiled into revosf2: the readers of games and CPK archives, the sound archive and wave readers, the detection of the game's sound builds, the readers of JAudio2's sound data, the sequence players of NW4R SND and JAudio2, the conversion of instruments and filters, and the command line's frame. |
 | The code page 932 table in ntdlib's `src/disc/cp932.h`, made from Unicode's CP932.TXT, Copyright © 1991-2026 Unicode, Inc. | Unicode License v3 (`Unicode-3.0`) | Compiled into revosf2 with ntdlib's disc reader. The reader decodes the Shift-JIS text of Wii discs with it. |
 
 Binary distributions must include the MIT notices of revosf2, seqlib, xsflib and ntdlib, and the Unicode License

@@ -6,7 +6,10 @@
 //
 // Output goes beside each archive. An input can also be a game: a Wii disc image, an extracted disc or a WiiWare
 // title's folder. Each of its sound archives converts into a folder of its own. Those folders go in a folder beside the
-// game. Windows accepts files dropped on the executable; macOS uses Revosf2.app.
+// game. revosf2 also converts the music and sound effects of Wii games that play their sound with JAudio: from the
+// game, or from the game's start-up archive (.baa) with the game's other sound files beside it. ntdlib's converter of
+// JAudio games converts them.
+// Windows accepts files dropped on the executable; macOS uses Revosf2.app.
 
 #include <algorithm>
 #include <cstddef>
@@ -15,6 +18,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <span>
@@ -29,6 +33,8 @@
 #include "ntdlib/sequence_export/consoles.h"
 #include "ntdlib/sequence_export/convert.h"
 #include "ntdlib/sequence_export/frame.h"
+#include "ntdlib/sequence_export/jaudio/game.h"
+#include "ntdlib/sequence_export/jaudio/game_input.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "ntdlib/sequence_export/sfz.h"
 #include "seqlib/file_name.h"
@@ -39,6 +45,7 @@
 
 namespace fs = std::filesystem;
 namespace frame = ntdlib::sequence_export;
+namespace jaudio = ntdlib::sequence_export::jaudio;
 using ntdlib::rsar::SoundArchive;
 using ntdlib::sequence_export::PerformOptions;
 using revosf2::FindMainDol;
@@ -53,6 +60,13 @@ namespace
 using Converter = frame::Converter<PerformOptions, SoundArchive, frame::Conversion>;
 using Options = frame::Options<PerformOptions>;
 using UsedFolders = std::vector<std::pair<fs::path, std::string>>;
+
+// The JAudio games among the inputs: the frame's converter of JAudio games, and the options for them.
+struct JAudioInputs
+{
+    const jaudio::GameConverter& converter;
+    frame::Options<jaudio::PerformOptions> options;
+};
 
 // The main.dol of a game given as an input: its bytes, and the game's path for the messages.
 struct GameDol
@@ -155,33 +169,61 @@ SoundArchive OpenGameArchive(std::vector<uint8_t> bytes, const std::string& name
     return archive;
 }
 
+// Converts the JAudio game at `path`, whose files `game` holds, the way ConvertGame converts a sound archive: into a
+// folder of its own in the game's output folder, named after the game's start-up archive. Returns 1 if the game has no
+// start-up archive or on any failure, otherwise 0.
+int ConvertJAudioGame(const fs::path& path, std::shared_ptr<ntdlib::disc::GameFiles> game, const std::regex& only,
+                      bool several, UsedFolders& used_folders, const JAudioInputs& jaudio_inputs)
+{
+    std::optional<jaudio::Game> opened = jaudio::Game::FromDiscFiles(std::move(game), "revosf2");
+    if (!opened)
+    {
+        std::fprintf(stderr, "%s: the game holds no Wii sound archive (.brsar) and no JAudio start-up archive (.baa)\n",
+                     frame::Utf8(path.filename()).c_str());
+        return 1;
+    }
+
+    const std::string archive_path = opened->DiscPath();
+    frame::Options<jaudio::PerformOptions> options = jaudio_inputs.options;
+    const fs::path out_dir =
+        options.output.empty() ? revosf2::GameOutputFolder(path) : frame::PathFromUtf8(options.output);
+    const std::string folder = xsflib::rip::ArchiveFolders({archive_path})[0];
+    options.output = frame::Utf8(out_dir / frame::PathFromUtf8(seqlib::SafeFileName(folder)));
+    const jaudio::GameConverter converter =
+        jaudio::MakeOpenGameConverter(jaudio_inputs.converter, [&opened] { return std::move(opened); });
+
+    return frame::ConvertInput(frame::Utf8(path / frame::PathFromUtf8(archive_path)), options, only, several,
+                               used_folders, converter);
+}
+
 // Converts each sound archive of the game at `input` the way frame::ConvertInput converts a loose archive. Each goes in
 // a folder of its own in the game's output folder. xsflib's ArchiveFolders names those folders the way the rip tools
-// name them. The game's main.dol gives the build unless --dol gives one (`prepare`). `several` is set when the command
-// line has more than one input. Returns 1 on any failure, otherwise 0.
+// name them. The game's main.dol gives the build unless --dol gives one (`prepare`). A game without a sound archive
+// converts as a JAudio game (ConvertJAudioGame). `several` is set when the command line has more than one input.
+// Returns 1 on any failure, otherwise 0.
 int ConvertGame(const std::string& input, const Options& options, const std::regex& only, bool several,
-                UsedFolders& used_folders, const Converter& converter, const PrepareArchive& prepare)
+                UsedFolders& used_folders, const Converter& converter, const PrepareArchive& prepare,
+                const JAudioInputs& jaudio_inputs)
 {
     const fs::path path = revosf2::GamePath(frame::PathFromUtf8(input));
     const std::string name = frame::Utf8(path.filename());
-    ntdlib::disc::GameFiles game;
-    if (const std::optional<std::string> error = ntdlib::disc::LoadGame(path, game, revosf2::DiscOptions()))
+    const auto game = std::make_shared<ntdlib::disc::GameFiles>();
+    if (const std::optional<std::string> error = ntdlib::disc::LoadGame(path, *game, revosf2::DiscOptions()))
     {
         std::fprintf(stderr, "%s: %s\n", name.c_str(), revosf2::GameMessage(*error).c_str());
         return 1;
     }
 
-    const std::vector<std::string> archives = game.SoundArchives();
+    const std::vector<std::string> archives = game->SoundArchives();
     if (archives.empty())
     {
-        std::fprintf(stderr, "%s: the game holds no Wii sound archive (.brsar)\n", name.c_str());
-        return 1;
+        return ConvertJAudioGame(path, game, only, several, used_folders, jaudio_inputs);
     }
 
     const fs::path out_dir =
         options.output.empty() ? revosf2::GameOutputFolder(path) : frame::PathFromUtf8(options.output);
     const std::vector<std::string> folders = xsflib::rip::ArchiveFolders(archives);
-    const GameDol dol{game.dol, frame::Utf8(path)};
+    const GameDol dol{game->dol, frame::Utf8(path)};
     int rc = 0;
     for (std::size_t a = 0; a < archives.size(); a++)
     {
@@ -202,7 +244,7 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
                                                         const std::string& archive_name) -> std::optional<SoundArchive>
         {
             std::vector<uint8_t> bytes;
-            if (!game.read_file(archive_path, bytes))
+            if (!game->read_file(archive_path, bytes))
             {
                 return std::nullopt;
             }
@@ -232,8 +274,10 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
 }
 
 // Processes the inputs on the command line and returns the exit status. frame::Run does the same for loose archives. A
-// game converts each of its sound archives (ConvertGame). Any other input converts as a loose archive.
-int Run(const std::vector<std::string>& args, const Converter& converter, const PrepareArchive& prepare)
+// game converts each of its sound archives (ConvertGame). A JAudio game's start-up archive converts with `games`, with
+// the game's other files beside it. Any other input converts as a loose archive.
+int Run(const std::vector<std::string>& args, const Converter& converter, const PrepareArchive& prepare,
+        const jaudio::GameConverter& games)
 {
     const Options options = frame::ParseOptions<PerformOptions>(args, converter.option);
     if (options.help)
@@ -259,6 +303,8 @@ int Run(const std::vector<std::string>& args, const Converter& converter, const 
 
     converter.before_inputs();
 
+    // A JAudio game takes the same options. It leaves out --dol and --var (jaudio::ArchiveProgramOptions).
+    const JAudioInputs jaudio_inputs{games, frame::ParseOptions<jaudio::PerformOptions>(args, games.option)};
     const std::regex only(options.only.empty() ? std::string(".*") : options.only);
     const bool several = options.archives.size() > 1;
     UsedFolders used_folders;
@@ -275,9 +321,13 @@ int Run(const std::vector<std::string>& args, const Converter& converter, const 
         const std::string& input = options.archives[i];
         try
         {
-            const int input_rc = revosf2::IsGameInput(frame::PathFromUtf8(input))
-                                     ? ConvertGame(input, options, only, several, used_folders, converter, prepare)
-                                     : frame::ConvertInput(input, options, only, several, used_folders, converter);
+            const fs::path path = frame::PathFromUtf8(input);
+            const int input_rc =
+                revosf2::IsGameInput(path)
+                    ? ConvertGame(input, options, only, several, used_folders, converter, prepare, jaudio_inputs)
+                : jaudio::IsStartUpArchiveFile(path)
+                    ? frame::ConvertInput(input, jaudio_inputs.options, only, several, used_folders, games)
+                    : frame::ConvertInput(input, options, only, several, used_folders, converter);
             rc = std::max(rc, input_rc);
         }
         catch (const std::exception& e)
@@ -302,7 +352,10 @@ int main(int argc, char** argv)
         "revosf2: convert Wii sound archive sequences (.brsar) to MIDI, SoundFont 2 and\n"
         "SFZ. An input can also be a game: a Wii disc image (ISO, NKit, WBFS or WDF),\n"
         "an extracted disc, or a WiiWare title's folder with its TMD and decrypted\n"
-        "contents. Each sound archive of a game converts into a folder of its own.\n";
+        "contents. Each sound archive of a game converts into a folder of its own.\n"
+        "It also converts the music and sound effects of Wii games that use JAudio:\n"
+        "give the game, or the game's start-up archive (.baa) with the Seqs and Waves\n"
+        "folders beside it.\n";
     program.extension = ".brsar";
     program.seed_option = "initial game random state (default 0x12345678)";
     program.extra_options =
@@ -373,9 +426,13 @@ int main(int argc, char** argv)
         return frame::ConvertSequence(archive, static_cast<uint32_t>(index), perform, settings, "revosf2");
     };
 
-    const auto run = [&converter, &prepare](const std::vector<std::string>& args)
+    // The frame's converter of JAudio games, for a Wii game that plays its music with JAudio.
+    const jaudio::GameConverter games = jaudio::MakeGameConverter(
+        program.program, program.version_line, jaudio::ArchiveProgramOptions(converter.option), converter.usage);
+
+    const auto run = [&converter, &prepare, &games](const std::vector<std::string>& args)
     {
-        return Run(args, converter, prepare);
+        return Run(args, converter, prepare, games);
     };
 
     return frame::RunMain(argc, argv, run);

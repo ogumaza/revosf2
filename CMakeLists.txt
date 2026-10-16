@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The version is revosf2 --version's, and the one in the file properties of the Windows program and the Info.plist of
 # the macOS app. A release changes it here and adds its notes in docs/release-notes/.
-project(revosf2 VERSION 1.1.0 LANGUAGES CXX)
+project(revosf2 VERSION 1.2.0 LANGUAGES CXX)
 
 # seqlib writes the MIDI and SoundFont files. xsflib holds the code that the converters share with the PSF players.
 # ntdlib holds the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.
@@ -34,8 +34,8 @@ xsflib_add_version(revosf2 VERSION ${PROJECT_VERSION} DEFINE REVOSF2_VERSION
 # Finder cannot drop files onto a command-line executable. Package it in a macOS droplet app, with the version in its
 # Info.plist.
 xsflib_add_droplet_tool(revosf2 APP_NAME Revosf2 VERSION ${PROJECT_VERSION}
-                        DESCRIPTION "Drop Wii sound archives (.brsar) here to convert them to MIDI, SoundFont and SFZ. Output goes in a folder beside each archive."
-                        PROMPT "Choose Wii sound archives (.brsar) to convert:" TRUNCATED)
+                        DESCRIPTION "Drop Wii sound archives (.brsar) or JAudio start-up archives (.baa) here to convert them to MIDI, SoundFont and SFZ. Output goes in a folder beside each archive."
+                        PROMPT "Choose Wii sound archives (.brsar) or JAudio start-up archives (.baa) to convert:" TRUNCATED)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -48,6 +48,22 @@ if(BUILD_TESTING)
   # It rejects a --dol file without AX's microcode, before it converts anything.
   add_test(NAME revosf2_dol_check COMMAND revosf2 --dol "${PROJECT_SOURCE_DIR}/LICENSE" missing.brsar)
   set_tests_properties(revosf2_dol_check PROPERTIES PASS_REGULAR_EXPRESSION "holds no AX microcode")
+
+  # It converts a Wii game that plays its music with JAudio: from the game's start-up archive with its other sound
+  # files beside it, and from an extracted disc that holds them and no sound archive. revosf2_test writes both. ctest
+  # ignores the exit code of a test with a pass expression. The conversions therefore also fail if revosf2 reports a
+  # failure.
+  set(revosf2_jaudio ${CMAKE_CURRENT_BINARY_DIR}/jaudio)
+  add_test(NAME revosf2_jaudio_files COMMAND revosf2_test --jaudio ${revosf2_jaudio})
+  add_test(NAME revosf2_jaudio_archive COMMAND revosf2 ${revosf2_jaudio}/archive/test.baa)
+  add_test(NAME revosf2_jaudio_game COMMAND revosf2 ${revosf2_jaudio}/disc)
+  set_tests_properties(revosf2_jaudio_files PROPERTIES FIXTURES_SETUP revosf2_jaudio)
+  set_tests_properties(revosf2_jaudio_archive PROPERTIES FIXTURES_REQUIRED revosf2_jaudio
+                       PASS_REGULAR_EXPRESSION "test\\.baa: 1 sequences -> .*test_revosf2"
+                       FAIL_REGULAR_EXPRESSION "can't read| [1-9][0-9]* failed")
+  set_tests_properties(revosf2_jaudio_game PROPERTIES FIXTURES_REQUIRED revosf2_jaudio
+                       PASS_REGULAR_EXPRESSION "test\\.baa: 1 sequences -> .*disc_revosf2.test"
+                       FAIL_REGULAR_EXPRESSION "can't read| [1-9][0-9]* failed")
 
   # Load local_tests.cmake from each immediate subdirectory to register tests that use locally supplied files.
   xsflib_include_local_tests()

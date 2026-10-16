@@ -3,11 +3,13 @@
 revosf2 converts Nintendo Wii sound archives (`.brsar`) to MIDI, SoundFont 2 and SFZ. Each
 sequence gets a MIDI file and a SoundFont containing its instruments. SFZ output includes the
 game's filters. SoundFont can only approximate them or leave them out (see
-[SFZ files](#sfz-files)).
+[SFZ files](#sfz-files)). revosf2 also converts the music and sound effects of Wii games that
+play their sound through JAudio2 (see [JAudio games](#jaudio-games)).
 
 Drop archives onto `revosf2.exe` on Windows or `Revosf2.app` on macOS. Output goes in a folder
 beside each archive. An input can also be a whole game: a disc image, an extracted disc or a
-WiiWare title (see [Games](#games)). From a terminal:
+WiiWare title (see [Games](#games)). It can also be a JAudio2 game's start-up archive (`.baa`).
+From a terminal:
 
 ```
 revosf2 [options] <archive.brsar> [<archive.brsar> ...]
@@ -76,7 +78,43 @@ revosf2 reads three kinds of game:
   Disc. Then convert the folder that Dolphin extracted it to.
 
 Give games on the command line, or drop them onto `revosf2.exe` on Windows. `Revosf2.app` on
-macOS takes only `.brsar` files.
+macOS takes only `.brsar` and `.baa` files.
+
+## JAudio games
+
+Some Wii games have no sound archive. They play their sound through JAudio2, the sound library
+in Nintendo EAD's JSystem. Twilight Princess and Link's Crossbow Training are two of them.
+revosf2 converts their music and sound effects. Give it the game, or the game's start-up archive
+(`.baa`) with the game's other sound files beside it. The game's files hold three kinds of sound
+file:
+
+- **The start-up archive** (`.baa`) contains the sound table and the sounds' names, the
+  instrument banks and the wave systems.
+- **The sequence archive** (an RARC archive in a `Seqs` folder beside the start-up archive)
+  contains the sequences.
+- **The wave archives** (`.aw` files in a `Waves` folder beside it) contain the samples.
+
+Given the game, revosf2 puts the files in a folder named after the start-up archive, inside
+`<game name>_revosf2`. Given the start-up archive, it puts them in `<archive name>_revosf2`
+beside the archive.
+
+The sequences come from the game's sound table, in its order. Sound effects are sequences too.
+Files take the names that the table gives the sounds. A sound without a name becomes
+`SOUND_<section>_<group>_<index>`. Files of the sequence archive that no sound plays come last.
+They keep the names of their files. `--loops`, `--seed` and `--only` work as for a sound
+archive. The game's random state starts at 0 unless `--seed` gives another. The game steers some
+sequences through ports. revosf2 starts each port at 0, as the game does. JAudio2's sequences
+have no variables, and NW4R SND's builds don't apply to them. `--var` and `--dol` change nothing
+in them.
+
+JAudio2 times its music for the GameCube's rate of about 32,028 Hz. The Wii plays it at
+32,000 Hz. There the music plays 0.089% slower and 1.5 cents lower than in the files.
+
+MIDI and SoundFont can't hold everything that JAudio2 does. The fitted envelopes can't follow an
+oscillator's table that rises again or loops. Random instrument effects play at their base
+values. Tremolos, track filters, pitch envelopes and notes on the DSP's built-in oscillators are
+left out. A vibrato deeper than a semitone is kept to a semitone. revosf2 reports each of these
+for each sequence. The game plays a limited number of notes at once. revosf2 keeps every note.
 
 ## Downloads
 
@@ -85,12 +123,12 @@ source (see [Building](#building)).
 
 ## Drag and drop
 
-- **Windows:** drop one or more `.brsar` files onto `revosf2.exe`, or games: their folders or
-  disc images. The console shows the results and waits for Enter before closing.
+- **Windows:** drop one or more `.brsar` or `.baa` files onto `revosf2.exe`, or games: their
+  folders or disc images. The console shows the results and waits for Enter before closing.
 - **macOS:** drop archives onto `Revosf2.app`, or open it to choose files. The app shows the
   results and offers to open the output folders. It wraps the command-line program because
   Finder cannot drop files onto a bare executable. The app is included in the
-  [build](#building). It takes only `.brsar` files. Convert games from a terminal.
+  [build](#building). It takes only `.brsar` and `.baa` files. Convert games from a terminal.
 
 An unreadable archive reports an error without stopping the others. If two inputs would use the
 same output folder, the second is skipped to protect the first's files. This can happen when
@@ -457,8 +495,10 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 `main.dol` beside an archive, and the low-pass of the builds from November 2008. It checks which
 inputs are games, the messages for disc images that revosf2 can't read, and the output folders
 of games. It checks that the program reports its version, and rejects a variable that the game
-doesn't have and a `--dol` file without AX's microcode. The conversion's unit tests are in the
-seqlib and ntdlib libraries. They run on synthetic files, without game data.
+doesn't have and a `--dol` file without AX's microcode. It converts a small JAudio2 game that
+the test program writes, from its start-up archive and from an extracted disc. The conversion's
+unit tests are in the seqlib and ntdlib libraries. They run on synthetic files, without game
+data.
 
 Other checks and tools:
 
@@ -469,7 +509,8 @@ Other checks and tools:
   (`sys/main.dol` in the game's files). Requires Python 3 and numpy.
 
 These development tools require game files supplied separately. revosf2 doesn't distribute those
-files. Normal conversion requires only the input: a `.brsar` archive or a game.
+files. Normal conversion requires only the input: a `.brsar` archive, a game or a JAudio2
+game's start-up archive.
 
 ## Licence
 

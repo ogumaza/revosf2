@@ -2,10 +2,12 @@
 
 // Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the search for main.dol, the low-pass of the
 // builds from November 2008, and which inputs are games. Given a sound archive (.brsar), also converts every sequence
-// in it with the Wii's settings and checks each conversion. The tests of seqlib, xsflib and ntdlib hold the unit tests
-// of the code that revosf2 shares with the other converters.
+// in it with the Wii's settings and checks each conversion. With --jaudio, writes a small JAudio game for the tests of
+// revosf2's JAudio inputs instead. The tests of seqlib, xsflib and ntdlib hold the unit tests of the code that revosf2
+// shares with the other converters.
 //
 //     revosf2_test [<archive.brsar>]
+//     revosf2_test --jaudio <folder>
 
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +30,7 @@
 #include "ntdlib/sequence_export/filter.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "ntdlib/testing/dol_files.h"
+#include "ntdlib/testing/jaudio_files.h"
 #include "ntdlib/testing/sequence_export_check.h"
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
@@ -275,10 +278,35 @@ void TestArchiveConvertsEverySequence(const char* path)
     }
 }
 
+// Write a small JAudio game's sound files twice in `folder` (ntdlib's WriteGameFiles): loose in "archive", and in an
+// extracted disc, "disc", whose files/Audiores folder holds them. The disc has no sound archive (.brsar). Its sys
+// folder holds the files that LoadGame requires: a header with the Wii's magic word, a main.dol and an empty file
+// system table.
+void WriteJAudioGames(const std::filesystem::path& folder)
+{
+    std::filesystem::remove_all(folder);
+    ntdlib::testing::jaudio_files::WriteGameFiles(folder / "archive");
+    ntdlib::testing::jaudio_files::WriteGameFiles(folder / "disc" / "files" / "Audiores");
+    std::vector<uint8_t> header(ntdlib::disc::kHeaderSize);
+    xsflib::StoreBe32(header.data() + ntdlib::disc::kWiiMagicOffset, ntdlib::disc::kWiiMagic);
+    const std::vector<uint8_t> kDol = {0x00, 0x00, 0x01, 0x00};
+    const std::vector<uint8_t> kFst(12);
+    std::filesystem::create_directories(folder / "disc" / "sys");
+    WriteBytes(folder / "disc" / "sys" / "boot.bin", header);
+    WriteBytes(folder / "disc" / "sys" / "main.dol", kDol);
+    WriteBytes(folder / "disc" / "sys" / "fst.bin", kFst);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--jaudio")
+    {
+        WriteJAudioGames(argv[2]);
+        return 0;
+    }
+
     TestMainDolShowsTheBuild();
     TestMainDolIsFoundBesideTheFiles();
     TestNovember2008LowPassSteps();
