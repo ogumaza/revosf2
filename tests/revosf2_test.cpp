@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-// Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the search for main.dol, the low-pass of the
-// builds from November 2008, and which inputs are games. Given a sound archive (.brsar), also converts every sequence
-// in it with the Wii's settings and checks each conversion. With --jaudio, writes a small JAudio game for the tests of
-// revosf2's JAudio inputs instead. The tests of seqlib, xsflib and ntdlib hold the unit tests of the code that revosf2
-// shares with the other converters.
+// Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the search for main.dol, the low-pass that the
+// Wii's settings give the builds from November 2008, the profiles of games, and which inputs are games. Given a sound
+// archive (.brsar), also converts every sequence in it with the Wii's settings and checks each conversion. With
+// --jaudio, writes a small JAudio game for the tests of revosf2's JAudio inputs instead. The tests of seqlib, xsflib
+// and ntdlib hold the unit tests of the code that revosf2 shares with the other converters.
 //
 //     revosf2_test [<archive.brsar>]
 //     revosf2_test --jaudio <folder>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +21,7 @@
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -36,8 +38,10 @@
 #include "xsflib/testing/check.h"
 
 #include "games.h"
+#include "profiles.h"
 #include "snd_build.h"
 
+using ntdlib::sequence_export::RevolutionSettings;
 using ntdlib::sequence_export::Settings;
 using ntdlib::sequence_export::SfzLowPassCutoff;
 using ntdlib::sequence_export::ToSoundFont;
@@ -63,8 +67,8 @@ void TestMainDolShowsTheBuild()
     const std::optional<revosf2::SndBuild> no_microcode = revosf2::ReadSndBuild(kNoMicrocode);
     const std::optional<revosf2::SndBuild> empty = revosf2::ReadSndBuild({});
 
-    XSFLIB_CHECK(old_build && old_build->October2006() && old_build->date == 0 && !old_build->Since2008());
-    XSFLIB_CHECK(march && !march->October2006() && march->date == 20080308 && march->Since2008() &&
+    XSFLIB_CHECK(old_build && old_build->October2006() && old_build->date == 0 && !old_build->SinceMarch2008());
+    XSFLIB_CHECK(march && !march->October2006() && march->date == 20080308 && march->SinceMarch2008() &&
                  !march->SinceJune2008());
     XSFLIB_CHECK(june && !june->October2006() && june->date == 20080620 && june->SinceJune2008());
     XSFLIB_CHECK(!no_microcode && !empty);
@@ -92,6 +96,37 @@ void TestMainDolIsFoundBesideTheFiles()
     XSFLIB_CHECK(!outside);
 }
 
+void TestCityFolkSetsUpItsMusic()
+{
+    // Another game's main.dol selects no profile. With City Folk's profile, each hourly piece and each piece of town
+    // music plays the tracks that the game plays in fine weather, and sends 0.25 to bus A. The town music leaves out
+    // track 15 too. The museum's music plays the tracks of its first room, without a send. K.K. Slider's songs play
+    // every track and send 0.28. The profile leaves the other sounds as they are.
+    const auto set_up = [](revosf2::Profile profile, std::string_view sound)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        revosf2::SetUpSound(profile, sound, options);
+        return std::pair(options.tracks, options.fx_sends);
+    };
+    const std::array<float, 3> kNoSends = {};
+
+    const revosf2::Profile other = revosf2::ProfileOf(MicrocodeDol(0x140, ""));
+    const auto hourly = set_up(revosf2::Profile::kCityFolk, "BGM_OUTDOOR_08");
+    const auto town = set_up(revosf2::Profile::kCityFolk, "BGM_TOWN_EARLY");
+    const auto museum = set_up(revosf2::Profile::kCityFolk, "BGM_MUSEUM");
+    const auto song = set_up(revosf2::Profile::kCityFolk, "BGM_KK04_SWING");
+    const auto first_town = set_up(revosf2::Profile::kCityFolk, "BGM_TOWN_FIRST");
+    const auto without = set_up(revosf2::Profile::kNone, "BGM_OUTDOOR_08");
+
+    XSFLIB_CHECK(other == revosf2::Profile::kNone);
+    XSFLIB_CHECK(hourly == std::pair(uint16_t{0x447f}, std::array<float, 3>{0.25f, 0.0f, 0.0f}));
+    XSFLIB_CHECK(town == std::pair(uint16_t{0x19ff}, std::array<float, 3>{0.25f, 0.0f, 0.0f}));
+    XSFLIB_CHECK(museum == std::pair(uint16_t{0x00e7}, kNoSends));
+    XSFLIB_CHECK(song == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.28f, 0.0f, 0.0f}));
+    XSFLIB_CHECK(first_town == std::pair(uint16_t{0xffff}, kNoSends));
+    XSFLIB_CHECK(without == std::pair(uint16_t{0xffff}, kNoSends));
+}
+
 void TestNovember2008LowPassSteps()
 {
     // The build of November 20 2008 takes the track low-pass's cutoff from a table (Util::CalcLpfFreq). A value below
@@ -102,11 +137,11 @@ void TestNovember2008LowPassSteps()
     const revosf2::SndBuild november_build{.date = 20081120};
     const revosf2::SndBuild september_build{.date = 20080919};
 
-    const Settings november = revosf2::SettingsFor(november_build);
-    const Settings september = revosf2::SettingsFor(september_build);
+    const Settings november = RevolutionSettings(november_build);
+    const Settings september = RevolutionSettings(september_build);
 
     const std::span<const uint16_t> hz = november.filters->low_pass_hz;
-    XSFLIB_CHECK(revosf2::SinceNovember2008(november_build) && !revosf2::SinceNovember2008(september_build));
+    XSFLIB_CHECK(november_build.SinceNovember2008() && !september_build.SinceNovember2008());
     XSFLIB_CHECK(hz.size() == 58 && hz[0] == 80 && hz[10] == 80 && hz[11] == 100 && hz[30] == 640 && hz[32] == 800 &&
                  hz[33] == 1000 && hz[57] == 12800);
     XSFLIB_CHECK(september.filters->low_pass_hz[32] == 1000);
@@ -269,7 +304,7 @@ void TestArchiveConvertsEverySequence(const char* path)
     {
         const ntdlib::rsar::SoundArchive archive = ntdlib::rsar::SoundArchive::Load(std::move(bytes));
         const revosf2::SndBuild build = ntdlib::sequence_export::BuildOfRsarVersion(archive.Version());
-        failures += ntdlib::testing::CheckArchive(archive, revosf2::SettingsFor(build), "revosf2");
+        failures += ntdlib::testing::CheckArchive(archive, RevolutionSettings(build), "revosf2");
     }
     catch (const std::exception& e)
     {
@@ -309,6 +344,7 @@ int main(int argc, char** argv)
 
     TestMainDolShowsTheBuild();
     TestMainDolIsFoundBesideTheFiles();
+    TestCityFolkSetsUpItsMusic();
     TestNovember2008LowPassSteps();
     TestGamesAreFoldersImagesAndTitleFiles();
     TestImagesThatRevosf2CantRead();
@@ -319,13 +355,5 @@ int main(int argc, char** argv)
         TestArchiveConvertsEverySequence(argv[1]);
     }
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::puts("all checks passed");
-
-    return 0;
+    return xsflib::testing::Summary("revosf2");
 }

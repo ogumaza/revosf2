@@ -40,6 +40,13 @@ itself. A game given as the input provides its `main.dol` too. A WiiWare title p
 main program. `--dol` gives it for an archive kept elsewhere. Without it, an archive plays by
 its version. revosf2 notes that for an archive older than version 1.4.
 
+Animal Crossing: City Folk sets up its music as each piece starts. Given the game's `main.dol`
+(the USA release), revosf2 does the same. Each hourly piece and each piece of town music plays
+the tracks that the game plays in fine weather. The game silences the piece's other tracks. Rain
+and snow play other sets of tracks. In the MIDI files, a silenced track keeps its notes at
+CC11 0. The museum's music plays the tracks of the room that the game starts it in. CC91 holds
+the sends that the game's code gives the music. revosf2 notes when it plays an archive this way.
+
 Files use the sequence names, with adjustments for Windows: forbidden characters and trailing
 dots or spaces become `_`, and reserved device names such as `CON` get an added `_`. If names
 differ only in ASCII letter case, later sequences get a sound-index suffix to avoid collisions
@@ -161,34 +168,44 @@ controllers. The performer models NW4R SND's sequence player, including:
   while no other track changes the sound or plays on. Setting a variable that another track
   reads counts as a change. A tie or mono legato on a note below hearing (see below) changes
   nothing that can be heard. A track that has sounded nothing and changed nothing for 10 seconds
-  doesn't count as playing on. Backward jumps to unvisited commands and passes without waits,
-  such as random retries, are not loops. A main loop in which no note starts isn't a loop either
-  once every earlier note has ended or is fading out. The sequence then ends with its last
-  sound. The markers go on the first pass that a player looping on them repeats as the game
-  plays the next one: the same notes at the same times, with the same settings and tempo. The
-  first pass often differs. Setup before the loop can land in its first tick. The game can keep
-  a value from pass to pass. Later passes may only tie again a note that the first pass strikes.
-  If no pass so far repeats that way but the next pass does, the performance plays that pass
-  too. Otherwise the markers stay on the first pass. They also stay there in a loop that draws
-  random numbers. At the loop's start, the MIDI file sends each controller, pitch, preset and
-  tempo that the game gives back there when the loop ends with another value. Without those
-  events, a player that loops on the markers would keep the loop end's value.
+  doesn't count as playing on. A sequence whose tracks all reach their end has no main loop.
+  Backward jumps to unvisited commands and passes without waits, such as random retries, are not
+  loops. Inside a subroutine, a jump back isn't a loop when its pass played no note that can be
+  heard and ran a conditional jump, call, return or end that could leave the loop. A tie or mono
+  legato on a note below hearing (see below) plays nothing that can be heard. A held note that
+  sounds until the game stops it keeps such a loop. A loop that a track runs inside a pass
+  of another loop, such as a countdown of waits between notes, is an inner loop. An inner loop's
+  passes don't qualify until the track has played no pass of another loop for 10 seconds. A main
+  loop in which no note starts isn't a loop either once every earlier note has ended or is
+  fading out. The sequence then ends with its last sound. The markers go on the first pass that
+  a player looping on them repeats as the game plays the next one: the same notes at the same
+  times, with the same settings and tempo. The first pass often differs. Setup before the loop
+  can land in its first tick. The game can keep a value from pass to pass. Later passes may only
+  tie again a note that the first pass strikes. If no pass so far repeats that way but the next
+  pass does, the performance plays that pass too. Otherwise the markers stay on the first pass.
+  They also stay there in a loop that draws random numbers. At the loop's start, the MIDI file
+  sends each controller, pitch, preset and tempo that the game gives back there when the loop
+  ends with another value. Without those events, a player that loops on the markers would keep
+  the loop end's value.
 
-NW4R SND changed how it plays sequences after its builds of 2006, and again in 2008. The game's
-`main.dol` shows which build it links. AX's microcode marks the builds of 2006: their AX moves
-0x120-byte parameter blocks, and every later one moves 0x140 bytes. The sound library's banner
-dates the later builds. revosf2 plays an archive as that build does. Without a `main.dol`, an
-archive of version 1.4 or later plays as the builds from June 2008, and an older archive as the
-builds of 2007. The archives of the builds of 2006 and 2007 have the same versions. Some games
-from 2008 also keep an archive of an older version, such as the archive of the Home Button menu.
+NW4R SND changed how it plays sequences after its builds of 2006, and again in 2008 and 2009.
+The game's `main.dol` shows which build it links. AX's microcode marks the builds of 2006: their
+AX moves 0x120-byte parameter blocks, and every later one moves 0x140 bytes. The sound library's
+banner dates the later builds. revosf2 plays an archive as that build does. Without a
+`main.dol`, an archive of version 1.4 or later plays as the builds from June 2008, and an older
+archive as the builds of 2007. The archives of the builds of 2006 and 2007 have the same
+versions. Some games from 2008 also keep an archive of an older version, such as the archive of
+the Home Button menu.
 
 The builds from March 2008 add time-prefixed volume and pan moves, the envelope's hold,
 monophonic tracks, regions that ignore note-offs, key groups, a finer `sweep_pitch` and a tempo
 limited to 1023. The builds from June 2008 add the velocity range, the biquad filter and the
 envelope reset. The builds from November 2008 take the track low-pass's cutoff from a table. The
 table's steps are about a third of an octave apart, from 80 Hz to 12.8 kHz. A setting between
-two steps takes the lower step's cutoff. The builds of 2006 count ticks in 416ths, and have no
-timebase. A tick there is 0.16% shorter than at the usual 48 ticks a quarter note. They play
+two steps takes the lower step's cutoff. The builds from September 2009 move a time-prefixed
+pitch bend to its value over the prefix's ticks. They also let a note's volume and envelope go
+above full level (see "Volume limits" below). The builds of 2006 count ticks in 416ths, and have
+no timebase. A tick there is 0.16% shorter than at the usual 48 ticks a quarter note. They play
 stereo waves in dual mode. At the centre, that's 3 dB louder than balance mode. They also raise
 a pan of 1 to 2, stop a released note once its volume falls to 0, and have 64 voices.
 
@@ -237,8 +254,9 @@ final settings, and MIDI controller changes are written before notes at the same
 | Track pan | CC10, mapped to the SoundFont pan law |
 | Pitch bend, sweep, portamento and legato key changes | Pitch bend, with RPN 0 range set per channel |
 | LFO depth | CC1 = depth / 2, mapped to vibrato or tremolo in the SoundFont |
-| Effect sends A and B | CC91 and CC93 (reverb and chorus) |
+| Effect sends A and B | CC91 and CC93 (reverb and chorus). A send that the game's code gives the sound adds to them. |
 | Immediate track silence | CC120 |
+| A track that the game's code silences | CC11 0 throughout. The track's notes stay. |
 | Low-pass filters that change during sounding notes | CC102, mapped to SoundFont cutoff by a modulator |
 | Track low-pass (0xd8), for SFZ | CC103 = 64 minus the argument; values <= 6 mean off |
 | Biquad filter (0xb4/0xb5, builds from 2008), for SFZ | CC104 = filter value; 0 means off |
@@ -273,7 +291,7 @@ regions become zones with:
 - From the 2008 builds, the region's hold. A note of a key group releases the others through
   their MIDI note-offs, at their release rates.
 - Loops repeated as needed to meet SoundFont padding rules: 8 samples before, at least 32
-  within, and 8 after. This preserves playback.
+  within, and 32 after. This preserves playback.
 - Continued playback for regions that ignore note-off. Their MIDI notes end when the game's
   notes would fall silent, with release settings that also preserve decay after a repeated
   strike.
@@ -376,12 +394,13 @@ in MIDI, SoundFont or SFZ:
   changes otherwise work through CC1.
 - **Deep tremolo.** The game's volume LFO can lower a note as far as silence but raise it by no
   more than 6 dB. The SoundFont and SFZ LFOs swing as far up as down. A volume LFO deeper than
-  6 dB is kept to 6 dB and reported. It then dips less than in the game. The game also never
-  takes a note above full level. While the note's envelope is at full level, the upper half of
-  the swing changes nothing. The SoundFont and SFZ LFOs can't stop at full level. A note that
-  the game holds at full level gets a preset whose smaller swing and lower level are fitted to
-  the game's level. A note at full level throughout swings half as far around a level that is
-  lower by the swing over pi. revosf2 reports those notes.
+  6 dB is kept to 6 dB and reported. It then dips less than in the game. Before the builds of
+  September 2009, the game also never takes a note above full level. While the note's envelope
+  is at full level, the upper half of the swing changes nothing. The SoundFont and SFZ LFOs
+  can't stop at full level. A note that the game holds at full level gets a preset whose smaller
+  swing and lower level are fitted to the game's level. A note at full level throughout swings
+  half as far around a level that is lower by the swing over pi. revosf2 reports those notes.
+  From September 2009, the game lets the swing pass full level, as the SoundFont and SFZ do.
 - **SoundFont filters.** The two-pole low-pass matches the biquad low-pass of the builds from
   2008. It approximates the one-pole track filter: it passes slightly more just above cutoff and
   less in the top octave, and its slope is twice as steep. ntdlib's
@@ -396,16 +415,18 @@ in MIDI, SoundFont or SFZ:
   SoundFont but included in SFZ. Effect sends A and B become CC91 and CC93. Synths play them as
   reverb and chorus. In the game, a send reaches whatever effect the game puts on that bus in
   that scene: any of NW4R SND's ReverbHi, ReverbStd, Chorus and Delay, or none.
-- **Volume limits.** NW4R SND never plays a note above full level, however high its volumes go.
-  It limits the product of the velocity squared, the region's volume and the track's volumes.
-  Track volume, second volume and main volume can reach 255. So can a velocity read from a
-  variable. MIDI's velocity stops at 127. CC7 and CC11 carry the track's volumes up to full
-  level. A note's preset raises its zones by the rest, up to full level. A note whose level
-  still differs from the game's by more than 0.1 dB is reported. That happens when a zone
-  reaches full level before its note does, or when a track's volumes change during a note.
-  After a legato, CC11 sets the note's level and can pass 127. All CC11 values are then scaled
-  equally. That keeps the balance between tracks and lowers the sequence's level. revosf2
-  reports the reduction. SFZ restores the MIDI gain.
+- **Volume limits.** Before its builds of September 2009, NW4R SND never plays a note above full
+  level, however high its volumes go. It limits the product of the velocity squared, the
+  region's volume and the track's volumes. Track volume, second volume and main volume can reach
+  255. So can a velocity read from a variable. MIDI's velocity stops at 127. CC7 and CC11 carry
+  the track's volumes up to full level. A note's preset raises its zones by the rest, up to full
+  level. A note whose level still differs from the game's by more than 0.1 dB is reported. That
+  happens when a zone reaches full level before its note does, or when a track's volumes change
+  during a note. After a legato, CC11 sets the note's level and can pass 127. All CC11 values
+  are then scaled equally. That keeps the balance between tracks and lowers the sequence's
+  level. revosf2 reports the reduction. SFZ restores the MIDI gain. The builds from September
+  2009 let a note's volume pass full level. revosf2 still plays such a note at full level, and
+  doesn't report it.
 - **AX output.** AX resamples with 4-tap filters whose coefficients depend on the pitch ratio.
   It darkens a voice playing more than 4/3 of its samples per output sample: a 44.1 kHz sample
   at its recorded pitch loses about 3 dB at 9 kHz. Synths interpolate differently. The zones and
@@ -459,7 +480,8 @@ SoundFont output follows the specification and targets FluidSynth. Player differ
 ## Building
 
 Requires C++20 and CMake 3.20 or later, with no other build dependencies. revosf2 supports
-macOS on Apple Silicon and Windows x64 with clang-cl. CI builds and tests both.
+macOS on Apple Silicon and Windows x64 with clang-cl. CI builds on both. The tests run in CI
+on Windows only.
 
 - **Windows:** install Visual Studio 2022 with "Desktop development with C++", including CMake.
   Add the "C++ Clang tools for Windows" component. Use Developer PowerShell or Developer Command
@@ -492,13 +514,13 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 ## Tests and tools
 
 `ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
-`main.dol` beside an archive, and the low-pass of the builds from November 2008. It checks which
-inputs are games, the messages for disc images that revosf2 can't read, and the output folders
-of games. It checks that the program reports its version, and rejects a variable that the game
-doesn't have and a `--dol` file without AX's microcode. It converts a small JAudio2 game that
-the test program writes, from its start-up archive and from an extracted disc. The conversion's
-unit tests are in the seqlib and ntdlib libraries. They run on synthetic files, without game
-data.
+`main.dol` beside an archive, the low-pass of the builds from November 2008 and the music set-up
+of Animal Crossing: City Folk. It checks which inputs are games, the messages for disc images
+that revosf2 can't read, and the output folders of games. It checks that the program reports its
+version, and rejects a variable that the game doesn't have and a `--dol` file without AX's
+microcode. It converts a small JAudio2 game that the test program writes, from its start-up
+archive and from an extracted disc. The conversion's unit tests are in the seqlib and ntdlib
+libraries. They run on synthetic files, without game data.
 
 Other checks and tools:
 
