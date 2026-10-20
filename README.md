@@ -47,6 +47,17 @@ and snow play other sets of tracks. In the MIDI files, a silenced track keeps it
 CC11 0. The museum's music plays the tracks of the room that the game starts it in. CC91 holds
 the sends that the game's code gives the music. revosf2 notes when it plays an archive this way.
 
+Mega Man 9 (WiiWare) plays each piece of its music as four sequences, one for each channel of
+the NES's sound chip. The game starts the four together. Their names are the piece's name
+followed by `_S1`, `_S2`, `_TR` and `_NO`. revosf2 converts each piece to one MIDI file, one
+SoundFont and one set of SFZ files, named after the piece. The MIDI tracks and the SFZ files
+take the names of the sequences and their tracks, such as `<name>_S1 Track 0`. The piece takes
+the tempo of its first sequence. The other sequences' notes keep their times. The piece's loop
+starts on the first pass that all four repeat. `--list` lists the pieces. `--only` picks a
+piece by its name or by the name of any of its sequences. While a sound effect holds one of the
+NES's channels, the game silences the music's sequence for that channel. The conversion plays
+the music without sound effects.
+
 Files use the sequence names, with adjustments for Windows: forbidden characters and trailing
 dots or spaces become `_`, and reserved device names such as `CON` get an added `_`. If names
 differ only in ASCII letter case, later sequences get a sound-index suffix to avoid collisions
@@ -228,9 +239,10 @@ game; revosf2 stops it and reports it.
 
 ### MIDI
 
-Each sequence track gets a MIDI track and channel of its own. Channel 10, reserved for drums in
-General MIDI, is allocated last. SoundFont synths use bank 128 for that channel. revosf2 copies
-that channel's presets to bank 128.
+Each sequence track gets a MIDI track and channel of its own. In a piece of several sequences,
+each sequence's tracks with notes get them, in the order of the sequences. Channel 10, reserved
+for drums in General MIDI, is allocated last. SoundFont synths use bank 128 for that channel.
+revosf2 copies that channel's presets to bank 128.
 
 MIDI output preserves tempo changes and uses at least 7680 ticks per quarter note, with an
 integer number of MIDI ticks per sequence tick. The game processes ticks in 3 ms sound frames,
@@ -444,7 +456,7 @@ in MIDI, SoundFont or SFZ:
   tick as AX has voices, the MIDI note continues with its existing preset and no gain above its
   starting level. Legatos that would otherwise require a new note are reported.
 
-SoundFont output follows the specification and targets FluidSynth. Player differences remain:
+SoundFont output follows the specification. Player differences remain:
 
 - **Level.** FluidSynth runs the SoundFont low-pass filter on every note. That includes notes
   whose filter is open. The filter divides the level by the square root of its Q. FluidSynth
@@ -457,16 +469,18 @@ SoundFont output follows the specification and targets FluidSynth. Player differ
   and releases then fall 4% slower in decibels, and sustain levels are 4% shallower: -11.9 dB
   plays as -11.4 dB. FluidSynth also slows any release faster than 15.6 ms (-7200 timecents)
   to that time.
-- **Attenuation.** Like E-mu hardware, FluidSynth applies 0.4 of a zone's initial attenuation.
-  The specification applies all of it. A region at volume 64 therefore plays 2.4 dB below one
-  at 127 in FluidSynth, rather than 6 dB.
+- **Attenuation.** Like E-mu hardware, FluidSynth and BASSMIDI apply 0.4 of a zone's initial
+  attenuation. The specification applies all of it. A region at volume 64 therefore plays 2.4 dB
+  below one at 127 in both players. The specification gives 6 dB.
 - **Low-pass level.** In FluidSynth, a note through the SoundFont's version of the biquad
   low-pass plays 0.85 dB below an unfiltered one. The game's filter lowers it by 0.5 dB.
 - **Pitch.** FluidSynth rounds pitch down to whole cents. Fractional bends can be almost a cent
   flat. A long note's loop can then drift by up to 35 ms per minute against the game. The
   beating of notes detuned by less than a cent changes too.
-- **Modulators.** TinySoundFont lacks SoundFont modulator support. CC1 LFO depth and CC102
-  filter changes have no effect there.
+- **Modulators.** BASSMIDI 2.4.16 ignores the CC1 and CC102 modulators. CC1 then gives the
+  specification's default vibrato in every zone: 50 cents at CC1 127. A tremolo becomes that
+  vibrato. Filters that change during a note stay open. TinySoundFont lacks SoundFont modulator
+  support. CC1 LFO depth and CC102 filter changes have no effect there.
 - **Tempo changes.** FluidSynth rounds its position to the nearest MIDI tick at each change
   and restarts its clock there. This can advance playback by half a tick per change: 1/30 ms
   at 120 BPM with 7680 ticks per quarter note. TinySoundFont rounds tempo-change times down to
@@ -514,13 +528,14 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 ## Tests and tools
 
 `ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
-`main.dol` beside an archive, the low-pass of the builds from November 2008 and the music set-up
-of Animal Crossing: City Folk. It checks which inputs are games, the messages for disc images
-that revosf2 can't read, and the output folders of games. It checks that the program reports its
-version, and rejects a variable that the game doesn't have and a `--dol` file without AX's
-microcode. It converts a small JAudio2 game that the test program writes, from its start-up
-archive and from an extracted disc. The conversion's unit tests are in the seqlib and ntdlib
-libraries. They run on synthetic files, without game data.
+`main.dol` beside an archive, the low-pass of the builds from November 2008, the music set-up of
+Animal Crossing: City Folk and the search for Mega Man 9's pieces by their sequences' names. It
+checks which inputs are games, the messages for disc images that revosf2 can't read, and the
+output folders of games. It checks that the program reports its version, and rejects a variable
+that the game doesn't have and a `--dol` file without AX's microcode. It converts a small
+JAudio2 game that the test program writes, from its start-up archive and from an extracted disc.
+The conversion's unit tests are in the seqlib and ntdlib libraries. They run on synthetic files,
+without game data.
 
 Other checks and tools:
 

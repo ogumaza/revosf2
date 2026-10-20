@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 // Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the search for main.dol, the low-pass that the
-// Wii's settings give the builds from November 2008, the profiles of games, and which inputs are games. Given a sound
-// archive (.brsar), also converts every sequence in it with the Wii's settings and checks each conversion. With
-// --jaudio, writes a small JAudio game for the tests of revosf2's JAudio inputs instead. The tests of seqlib, xsflib
-// and ntdlib hold the unit tests of the code that revosf2 shares with the other converters.
+// Wii's settings give the builds from November 2008, the profiles of games, the pieces of several sequences, and which
+// inputs are games. Given a sound archive (.brsar), also converts every sequence and every piece of several sequences
+// in it with the Wii's settings, and checks each conversion. A main.dol after the archive gives the build of NW4R SND.
+// With --jaudio, writes a small JAudio game for the tests of revosf2's JAudio inputs instead. The tests of seqlib,
+// xsflib and ntdlib hold the unit tests of the code that revosf2 shares with the other converters.
 //
-//     revosf2_test [<archive.brsar>]
+//     revosf2_test [<archive.brsar> [<main.dol>]]
 //     revosf2_test --jaudio <folder>
 
 #include <array>
@@ -29,15 +30,19 @@
 #include "ntdlib/disc/header.h"
 #include "ntdlib/rsar/formats.h"
 #include "ntdlib/sequence_export/consoles.h"
+#include "ntdlib/sequence_export/convert.h"
 #include "ntdlib/sequence_export/filter.h"
+#include "ntdlib/sequence_export/frame.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "ntdlib/testing/dol_files.h"
 #include "ntdlib/testing/jaudio_files.h"
+#include "ntdlib/testing/rsar_files.h"
 #include "ntdlib/testing/sequence_export_check.h"
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
 
 #include "games.h"
+#include "pieces.h"
 #include "profiles.h"
 #include "snd_build.h"
 
@@ -125,6 +130,45 @@ void TestCityFolkSetsUpItsMusic()
     XSFLIB_CHECK(song == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.28f, 0.0f, 0.0f}));
     XSFLIB_CHECK(first_town == std::pair(uint16_t{0xffff}, kNoSends));
     XSFLIB_CHECK(without == std::pair(uint16_t{0xffff}, kNoSends));
+}
+
+void TestPiecesAreFoundByTheirLabels()
+{
+    // Four sequences whose labels are one name followed by _S1, _S2, _TR and _NO make a piece. It takes the name and
+    // the place of its first sequence in the list. Three of the four labels make no piece. A stream with the first
+    // label doesn't start one. Neither does a label that is only the first ending.
+    const std::vector<uint8_t> bytes = ntdlib::testing::rsar_files::MakeSoundTable({{"SEQ_TITLE_S1", 1, 0},
+                                                                                    {"SEQ_TITLE_S2", 1, 0},
+                                                                                    {"SEQ_TITLE_TR", 1, 0},
+                                                                                    {"SEQ_TITLE_NO", 1, 0},
+                                                                                    {"SEQ_JINGLE", 1, 0},
+                                                                                    {"SEQ_SHORT_S1", 1, 0},
+                                                                                    {"SEQ_SHORT_S2", 1, 0},
+                                                                                    {"SEQ_SHORT_TR", 1, 0},
+                                                                                    {"STRM_S1", 2, 0},
+                                                                                    {"STRM_S2", 1, 0},
+                                                                                    {"STRM_TR", 1, 0},
+                                                                                    {"STRM_NO", 1, 0},
+                                                                                    {"_S1", 1, 0}},
+                                                                                   {"PLAYER_BGM"});
+    const ntdlib::rsar::SoundArchive archive = ntdlib::rsar::SoundArchive::Load(bytes);
+
+    const std::vector<revosf2::Piece> pieces = revosf2::FindPieces(archive);
+    const std::vector<ntdlib::sequence_export::Sequence> sequences = revosf2::ArchiveSequences(archive);
+
+    std::vector<std::string> names;
+    for (const ntdlib::sequence_export::Sequence& sequence : sequences)
+    {
+        names.push_back(sequence.name);
+    }
+    const std::vector<std::string> kNames = {"SEQ_TITLE", "SEQ_JINGLE", "SEQ_SHORT_S1", "SEQ_SHORT_S2", "SEQ_SHORT_TR",
+                                             "STRM_S2",   "STRM_TR",    "STRM_NO",      "_S1"};
+    const std::vector<std::string> kLabels = {"SEQ_TITLE_S1", "SEQ_TITLE_S2", "SEQ_TITLE_TR", "SEQ_TITLE_NO"};
+    XSFLIB_CHECK(pieces.size() == 1 && pieces[0].name == "SEQ_TITLE" &&
+                 pieces[0].sounds == (std::vector<uint32_t>{0, 1, 2, 3}));
+    XSFLIB_CHECK(names == kNames && sequences[0].index == 0 && sequences[0].labels == kLabels &&
+                 sequences[1].labels.empty());
+    XSFLIB_CHECK(revosf2::PieceAt(pieces, 0) && !revosf2::PieceAt(pieces, 1));
 }
 
 void TestNovember2008LowPassSteps()
@@ -287,9 +331,39 @@ void TestGameOutputFolders()
     XSFLIB_CHECK(image_output == image.parent_path() / "game.nkit_revosf2");
 }
 
-// Convert every sequence of the archive at `path` with the settings of the build that its version gives, and check
-// each conversion (ntdlib::testing::CheckArchive).
-void TestArchiveConvertsEverySequence(const char* path)
+// Convert each piece of several sequences in `archive` (FindPieces) with `settings`, and check each conversion
+// (ntdlib::testing::CheckConversion). Print the number of pieces and of those that loop.
+void CheckPieces(const ntdlib::rsar::SoundArchive& archive, const Settings& settings)
+{
+    const std::vector<revosf2::Piece> pieces = revosf2::FindPieces(archive);
+    int looping = 0;
+    for (const revosf2::Piece& piece : pieces)
+    {
+        try
+        {
+            const ntdlib::sequence_export::Conversion c =
+                ntdlib::sequence_export::ConvertTogether(archive, piece.sounds, piece.name, {}, settings, "revosf2");
+            failures += ntdlib::testing::CheckConversion(c, piece.name);
+            looping += c.performance.loop ? 1 : 0;
+            for (const std::string& warning : c.warnings)
+            {
+                std::fprintf(stderr, "%s: %s\n", piece.name.c_str(), warning.c_str());
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::fprintf(stderr, "%s: %s\n", piece.name.c_str(), e.what());
+            failures++;
+        }
+    }
+
+    std::printf("archive: %zu pieces, %d loop\n", pieces.size(), looping);
+}
+
+// Convert every sequence and every piece of several sequences of the archive at `path`, and check each conversion
+// (ntdlib::testing::CheckArchive and CheckPieces). The main.dol at `dol` gives the build of NW4R SND. Without one, the
+// archive's version gives it.
+void TestArchiveConvertsEverySequence(const char* path, const char* dol)
 {
     std::ifstream f(path, std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
@@ -300,11 +374,27 @@ void TestArchiveConvertsEverySequence(const char* path)
         return;
     }
 
+    std::optional<revosf2::SndBuild> dol_build;
+    if (dol)
+    {
+        std::ifstream dol_file(dol, std::ios::binary);
+        const std::vector<uint8_t> dol_bytes((std::istreambuf_iterator<char>(dol_file)), {});
+        dol_build = revosf2::ReadSndBuild(dol_bytes);
+        if (!dol_build)
+        {
+            std::fprintf(stderr, "%s shows no build of NW4R SND\n", dol);
+            failures++;
+            return;
+        }
+    }
+
     try
     {
         const ntdlib::rsar::SoundArchive archive = ntdlib::rsar::SoundArchive::Load(std::move(bytes));
-        const revosf2::SndBuild build = ntdlib::sequence_export::BuildOfRsarVersion(archive.Version());
+        const revosf2::SndBuild build =
+            dol_build.value_or(ntdlib::sequence_export::BuildOfRsarVersion(archive.Version()));
         failures += ntdlib::testing::CheckArchive(archive, RevolutionSettings(build), "revosf2");
+        CheckPieces(archive, RevolutionSettings(build));
     }
     catch (const std::exception& e)
     {
@@ -345,6 +435,7 @@ int main(int argc, char** argv)
     TestMainDolShowsTheBuild();
     TestMainDolIsFoundBesideTheFiles();
     TestCityFolkSetsUpItsMusic();
+    TestPiecesAreFoundByTheirLabels();
     TestNovember2008LowPassSteps();
     TestGamesAreFoldersImagesAndTitleFiles();
     TestImagesThatRevosf2CantRead();
@@ -352,7 +443,7 @@ int main(int argc, char** argv)
 
     if (argc > 1)
     {
-        TestArchiveConvertsEverySequence(argv[1]);
+        TestArchiveConvertsEverySequence(argv[1], argc > 2 ? argv[2] : nullptr);
     }
 
     return xsflib::testing::Summary("revosf2");

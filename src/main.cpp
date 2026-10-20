@@ -6,9 +6,10 @@
 //
 // Output goes beside each archive. An input can also be a game: a Wii disc image, an extracted disc or a WiiWare
 // title's folder. Each of its sound archives converts into a folder of its own. Those folders go in a folder beside the
-// game. revosf2 also converts the music and sound effects of Wii games that play their sound with JAudio: from the
-// game, or from the game's start-up archive (.baa) with the game's other sound files beside it. ntdlib's converter of
-// JAudio games converts them.
+// game. Music that a game plays as several sequences together converts as one piece (pieces.h). revosf2 also converts
+// the music and sound effects of Wii games that play their sound with JAudio: from the game, or from the game's
+// start-up archive (.baa) with the game's other sound files beside it. ntdlib's converter of JAudio games converts
+// them.
 // Windows accepts files dropped on the executable; macOS uses Revosf2.app.
 
 #include <algorithm>
@@ -40,6 +41,7 @@
 #include "xsflib/rip/tool.h"
 
 #include "games.h"
+#include "pieces.h"
 #include "profiles.h"
 #include "snd_build.h"
 
@@ -396,10 +398,18 @@ int main(int argc, char** argv)
     {
         prepare(input, archive, options.quiet, nullptr);
     };
+
+    // A piece of several sequences converts as one (pieces.h).
+    converter.sequences = revosf2::ArchiveSequences;
     converter.convert = [&settings, &profile](SoundArchive& archive, std::size_t index, const PerformOptions& perform)
     {
         PerformOptions options = perform;
         revosf2::SetUpSound(profile, archive.Sounds()[index].name, options);
+        if (const std::optional<revosf2::Piece> piece = revosf2::PieceAt(revosf2::FindPieces(archive), index))
+        {
+            return frame::ConvertTogether(archive, piece->sounds, piece->name, options, settings, "revosf2");
+        }
+
         return frame::ConvertSequence(archive, static_cast<uint32_t>(index), options, settings, "revosf2");
     };
 

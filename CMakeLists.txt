@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The version is revosf2 --version's, and the one in the file properties of the Windows program and the Info.plist of
 # the macOS app. A release changes it here and adds its notes in docs/release-notes/.
-project(revosf2 VERSION 1.2.1 LANGUAGES CXX)
+project(revosf2 VERSION 1.3.0 LANGUAGES CXX)
 
 # seqlib writes the MIDI and SoundFont files. xsflib holds the code that the converters share with the PSF players.
 # ntdlib holds the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.
@@ -22,7 +22,7 @@ xsflib_add_libraries(seqlib xsflib ntdlib)
 # ntdlib's disc library reads games: disc images, extracted discs and WiiWare titles, and the CPK archives in them. It
 # requires no other library. xsflib's rip library names each archive's folder in a game's output folder. ntdlib's
 # sequence_export_jaudio converts the games that play their sound with JAudio.
-add_library(revosf2_core STATIC src/games.cpp src/profiles.cpp src/snd_build.cpp)
+add_library(revosf2_core STATIC src/games.cpp src/pieces.cpp src/profiles.cpp src/snd_build.cpp)
 target_include_directories(revosf2_core PUBLIC src)
 target_link_libraries(revosf2_core PUBLIC ntdlib::disc ntdlib::rsar ntdlib::sequence_export xsflib::common)
 
