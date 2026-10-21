@@ -328,8 +328,8 @@ filter. SFZ supports all of these filters. revosf2 also writes these SFZ files:
   are separate files, panned left and right.
 
 SFZ players ignore MIDI channels, and each file contains one instrument. Load the MIDI in a DAW
-and assign an SFZ player, such as sfizz, to each track with its matching file. Output targets
-sfizz 1.2.
+and assign an SFZ player, such as sfizz, to each track with its matching file. The player tested
+is sfizz 1.2.
 
 Presets use program change, plus bank select (CC0) when a sequence has more than 128 presets.
 Regions match the SoundFont, with these differences:
@@ -343,9 +343,9 @@ Regions match the SoundFont, with these differences:
   Instead, CC104 selects filtered or unfiltered regions at note-on, and that choice lasts for
   the note. As in the game, the choice is the one that the note's sound frame ends with. Each
   track uses its first biquad type. Later types are omitted and reported.
-- **Envelopes.** As in the game, sfizz decay and release fall linearly in dB: by 78.17 dB over
-  their specified duration. They use the game's time for that fall. Attack uses the SoundFont
-  fit described above.
+- **Envelopes.** As in the game, decays and releases fall linearly in dB. The documentation's
+  curve falls by a factor of e^-8 over the specified time. That's 69.49 dB. They use the game's
+  time for that fall. Attack uses the SoundFont fit described above.
 - **LFO.** SFZ uses a sine, matching the game, and supports pan LFO.
 - **Pan.** A curve maps CC10 to `(value - 64) / 64`, the SoundFont convention that the MIDI
   output uses.
@@ -357,14 +357,35 @@ Regions match the SoundFont, with these differences:
 - **Loops.** sfizz crossfades the loop end with data before the loop start over at least 1 ms.
   Samples include 4 ms of repeated loop data before the start. The crossfade is then inaudible.
 
-Two sfizz 1.2.3 quirks affect playback:
+Three sfizz 1.2.3 quirks affect playback:
 
+- **Decays and releases.** sfizz ends them sooner than the documentation's curve. Over the
+  specified time, sfizz falls by a factor of e^-9: 78.17 dB. Where the game has fallen 40 dB,
+  sfizz has fallen 45 dB.
 - **Sample rate.** Loading a file configures its filters for 48 kHz. A subsequent sample-rate
   change corrects them. At other rates, load files before setting the rate. `sfizz_render` and
   `sfizz_jack` set it first; `sfizz_render` defaults to 48 kHz unless told otherwise.
 - **Streaming.** During offline rendering, streamed samples can fall silent after their
   preloaded portion. The files request full loading with `hint_ram_based=1`. sfizz prints
   "Unsupported value for hint_stealing: 1" for this; the message is harmless.
+
+The opcodes follow their documentation at sfzformat.com, with these exceptions:
+
+- **Long decays and releases.** A decay or release can last longer than the documented limit of
+  100 s. The game's envelope falls that slowly. sfizz 1.2 plays the time as written.
+- **Long attacks.** A note that the game releases during its attack gets a longer attack (see
+  "Differences from the game"). That attack can last up to 101.6 s. The documented limit is
+  100 s. sfizz 1.2 plays the time as written.
+- **Loud regions.** A region's `volume` can lie above the documented limit of 6 dB. sfizz 1.2
+  takes volumes up to 48 dB.
+- **Low resonances.** The game's biquad presets have resonances down to -49 dB. The documented
+  range starts at 0 dB. Each biquad track's curve reaches resonances below 0 dB. sfizz 1.2 plays
+  those resonances.
+- **A wide resonance amount.** Biquad type 5 has steps down to -49 dB. A track of that type
+  moves its resonance in units of 50 dB. The documentation gives the amount a range of -40 to
+  40 dB.
+- **High cutoffs.** A region pitched far up can get a low-pass cutoff above half the output's
+  sample rate. The documentation gives half the rate as the limit.
 
 ## Differences from the game
 
@@ -456,7 +477,8 @@ in MIDI, SoundFont or SFZ:
   tick as AX has voices, the MIDI note continues with its existing preset and no gain above its
   starting level. Legatos that would otherwise require a new note are reported.
 
-SoundFont output follows the specification. Player differences remain:
+SoundFont output follows the specification, apart from the zones' attenuation and the biquad
+low-pass's resonance. Player differences remain:
 
 - **Level.** FluidSynth runs the SoundFont low-pass filter on every note. That includes notes
   whose filter is open. The filter divides the level by the square root of its Q. FluidSynth
@@ -469,11 +491,19 @@ SoundFont output follows the specification. Player differences remain:
   and releases then fall 4% slower in decibels, and sustain levels are 4% shallower: -11.9 dB
   plays as -11.4 dB. FluidSynth also slows any release faster than 15.6 ms (-7200 timecents)
   to that time.
-- **Attenuation.** Like E-mu hardware, FluidSynth and BASSMIDI apply 0.4 of a zone's initial
-  attenuation. The specification applies all of it. A region at volume 64 therefore plays 2.4 dB
-  below one at 127 in both players. The specification gives 6 dB.
+- **Attenuation.** FluidSynth, BASSMIDI and the E-mu chips apply 0.4 of a zone's initial
+  attenuation. The specification calls for all of it. revosf2 therefore writes 2.5 times a
+  zone's attenuation in the generator, up to the generator's limit of 1440 cB. Those players
+  play that limit as 57.6 dB. A modulator without a source holds any attenuation beyond 57.6 dB.
+  FluidSynth 2.4.5 and later apply that modulator. BASSMIDI and earlier versions of FluidSynth
+  ignore it. A player that follows the specification plays every attenuated zone too quietly.
+  TinySoundFont plays a quarter of the attenuation. Before 27 January 2025, TinySoundFont played
+  2.5 times the attenuation.
 - **Low-pass level.** In FluidSynth, a note through the SoundFont's version of the biquad
   low-pass plays 0.85 dB below an unfiltered one. The game's filter lowers it by 0.5 dB.
+- **Resonance.** FluidSynth, BASSMIDI and the E-mu chips play a resonance of r dB as r - 3 dB at
+  the cutoff. The specification calls for r dB. revosf2 writes the biquad low-pass's resonance
+  for those players. A player that follows the specification plays 3 dB more at the cutoff.
 - **Pitch.** FluidSynth rounds pitch down to whole cents. Fractional bends can be almost a cent
   flat. A long note's loop can then drift by up to 35 ms per minute against the game. The
   beating of notes detuned by less than a cent changes too.

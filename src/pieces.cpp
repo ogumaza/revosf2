@@ -16,7 +16,9 @@
 #include <utility>
 #include <vector>
 
+#include "ntdlib/rsar/formats.h"
 #include "ntdlib/sequence_export/archive_converter.h"
+#include "ntdlib/sequence_export/frame.h"
 
 namespace revosf2
 {

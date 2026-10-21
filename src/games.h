@@ -15,9 +15,9 @@
 namespace revosf2
 {
 
-// LoadGame's options for revosf2: Wii games, WiiWare titles, and the sound archives inside CPK archives. Images in
-// the compressed formats that ntdlib::disc_containers reads (GCZ, CISO, WIA and RVZ) are refused with a message. It
-// says how to extract the disc instead.
+// LoadGame's options for revosf2: Wii games, WiiWare titles, and the sound archives inside CPK archives. Images in the
+// compressed formats that ntdlib::disc_containers reads (GCZ, CISO, WIA and RVZ) are refused with a message. It says
+// how to extract the disc instead.
 ntdlib::disc::GameOptions DiscOptions();
 
 // True if `input` is a game rather than a sound archive: a folder that holds a game in a layout that LoadGame reads, a

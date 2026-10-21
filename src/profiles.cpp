@@ -5,8 +5,11 @@
 #include "profiles.h"
 
 #include <array>
-#include <string>
+#include <cstdint>
+#include <span>
+#include <string_view>
 
+#include "ntdlib/sequence_export/performance.h"
 #include "xsflib/sha1.h"
 
 namespace revosf2
@@ -21,7 +24,7 @@ using ntdlib::sequence_export::PerformOptions;
 constexpr std::string_view kCityFolkSha1 = "c87967b9ac0a943ba04ac16d875f5f79b4c46516";
 
 // A piece of City Folk's music that the game plays with only some of its tracks: the tracks that sound.
-struct Piece
+struct PieceTracks
 {
     std::string_view name;
     uint16_t tracks;
@@ -30,11 +33,11 @@ struct Piece
 // City Folk's main.dol holds three masks of tracks for each hourly piece (BGM_OUTDOOR_00 to 23, at 0x8047e9f0) and for
 // each piece of town music (BGM_TOWN_EARLY to BGM_TOWN_MIDNIGHT, at 0x8047ea90). As a piece starts, the game picks one
 // by the weather (0x8007e000). It takes the first for weather 0 to 2, the second for rain (3 and 4) and the third for
-// snow (5 and 6). It then sets the tracks outside the mask to volume 0 (SeqSound::SetTrackVolume, from 0x801cc490).
-// The profile plays the pieces in fine weather, with the first masks. The museum's music (BGM_MUSEUM) takes a mask by
-// room from the seven at 0x8047ea80. The game starts it with the first (0x801cb9bc). The rooms of stages 30 and 37 keep
-// that mask.
-constexpr std::array<Piece, 29> kCityFolkPieces = {{
+// snow (5 and 6). It then sets the tracks outside the mask to volume 0 (SeqSound::SetTrackVolume, from 0x801cc490). The
+// profile plays the pieces in fine weather, with the first masks. The museum's music (BGM_MUSEUM) takes a mask by room
+// from the seven at 0x8047ea80. The game starts it with the first (0x801cb9bc). The rooms of stages 30 and 37 keep that
+// mask.
+constexpr std::array<PieceTracks, 29> kCityFolkPieces = {{
     {"BGM_OUTDOOR_00", 0x00ff}, {"BGM_OUTDOOR_01", 0x07ff}, {"BGM_OUTDOOR_02", 0x007f}, {"BGM_OUTDOOR_03", 0x03ff},
     {"BGM_OUTDOOR_04", 0x009f}, {"BGM_OUTDOOR_05", 0x002f}, {"BGM_OUTDOOR_06", 0x05ff}, {"BGM_OUTDOOR_07", 0x09ff},
     {"BGM_OUTDOOR_08", 0x447f}, {"BGM_OUTDOOR_09", 0x009f}, {"BGM_OUTDOOR_10", 0x04ff}, {"BGM_OUTDOOR_11", 0x13ff},
@@ -63,7 +66,7 @@ void SetUpCityFolkSound(std::string_view sound, PerformOptions& perform)
         return;
     }
 
-    for (const Piece& piece : kCityFolkPieces)
+    for (const PieceTracks& piece : kCityFolkPieces)
     {
         if (piece.name != sound)
         {
@@ -72,10 +75,12 @@ void SetUpCityFolkSound(std::string_view sound, PerformOptions& perform)
 
         const bool town = sound.starts_with("BGM_TOWN_");
         perform.tracks = town ? static_cast<uint16_t>(piece.tracks & ~kTownTrack15) : piece.tracks;
+
         if (sound != "BGM_MUSEUM")
         {
             perform.fx_sends[0] = kMusicSend;
         }
+
         return;
     }
 }

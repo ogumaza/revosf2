@@ -17,9 +17,8 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
+#include <ios>
 #include <optional>
-#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,18 +27,22 @@
 
 #include "ntdlib/disc/game.h"
 #include "ntdlib/disc/header.h"
+#include "ntdlib/disc/image.h"
 #include "ntdlib/rsar/formats.h"
 #include "ntdlib/sequence_export/consoles.h"
 #include "ntdlib/sequence_export/convert.h"
 #include "ntdlib/sequence_export/filter.h"
 #include "ntdlib/sequence_export/frame.h"
+#include "ntdlib/sequence_export/performance.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "ntdlib/testing/dol_files.h"
 #include "ntdlib/testing/jaudio_files.h"
 #include "ntdlib/testing/rsar_files.h"
 #include "ntdlib/testing/sequence_export_check.h"
 #include "xsflib/bytes.h"
+#include "xsflib/files.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 #include "games.h"
 #include "pieces.h"
@@ -83,8 +86,8 @@ void TestMainDolIsFoundBesideTheFiles()
 {
     // Dolphin and wit extract a disc into a sys folder and a files folder. An archive anywhere in files finds
     // sys/main.dol. An archive outside a files folder finds nothing.
-    const std::filesystem::path root = std::filesystem::temp_directory_path() / "revosf2_test_disc";
-    std::filesystem::remove_all(root);
+    const xsflib::testing::TempFolder temp("revosf2_test_disc");
+    const std::filesystem::path& root = temp.Path();
     std::filesystem::create_directories(root / "files" / "Sound");
     std::filesystem::create_directories(root / "sys");
     for (const std::filesystem::path& file :
@@ -95,7 +98,6 @@ void TestMainDolIsFoundBesideTheFiles()
 
     const std::optional<std::filesystem::path> inside = revosf2::FindMainDol(root / "files" / "Sound" / "a.brsar");
     const std::optional<std::filesystem::path> outside = revosf2::FindMainDol(root / "a.brsar");
-    std::filesystem::remove_all(root);
 
     XSFLIB_CHECK(inside && inside->filename() == "main.dol" && inside->parent_path().filename() == "sys");
     XSFLIB_CHECK(!outside);
@@ -113,7 +115,6 @@ void TestCityFolkSetsUpItsMusic()
         revosf2::SetUpSound(profile, sound, options);
         return std::pair(options.tracks, options.fx_sends);
     };
-    const std::array<float, 3> kNoSends = {};
 
     const revosf2::Profile other = revosf2::ProfileOf(MicrocodeDol(0x140, ""));
     const auto hourly = set_up(revosf2::Profile::kCityFolk, "BGM_OUTDOOR_08");
@@ -123,6 +124,7 @@ void TestCityFolkSetsUpItsMusic()
     const auto first_town = set_up(revosf2::Profile::kCityFolk, "BGM_TOWN_FIRST");
     const auto without = set_up(revosf2::Profile::kNone, "BGM_OUTDOOR_08");
 
+    const std::array<float, 3> kNoSends = {};
     XSFLIB_CHECK(other == revosf2::Profile::kNone);
     XSFLIB_CHECK(hourly == std::pair(uint16_t{0x447f}, std::array<float, 3>{0.25f, 0.0f, 0.0f}));
     XSFLIB_CHECK(town == std::pair(uint16_t{0x19ff}, std::array<float, 3>{0.25f, 0.0f, 0.0f}));
@@ -161,6 +163,7 @@ void TestPiecesAreFoundByTheirLabels()
     {
         names.push_back(sequence.name);
     }
+
     const std::vector<std::string> kNames = {"SEQ_TITLE", "SEQ_JINGLE", "SEQ_SHORT_S1", "SEQ_SHORT_S2", "SEQ_SHORT_TR",
                                              "STRM_S2",   "STRM_TR",    "STRM_NO",      "_S1"};
     const std::vector<std::string> kLabels = {"SEQ_TITLE_S1", "SEQ_TITLE_S2", "SEQ_TITLE_TR", "SEQ_TITLE_NO"};
@@ -193,17 +196,6 @@ void TestNovember2008LowPassSteps()
     XSFLIB_CHECK(ToSoundFont(TrackFilters(33, 0, 0, november), november) ==
                  ToSoundFont(TrackFilters(32, 0, 0, september), september));
     XSFLIB_CHECK(SfzLowPassCutoff(33, november) == SfzLowPassCutoff(32, september));
-}
-
-// An empty folder in the system's temp folder, for one test. Two runs at once get different folders.
-std::filesystem::path TempFolder(const std::string& name)
-{
-    const std::filesystem::path folder =
-        std::filesystem::temp_directory_path() / (name + "_" + std::to_string(std::random_device{}()));
-    std::filesystem::remove_all(folder);
-    std::filesystem::create_directories(folder);
-
-    return folder;
 }
 
 void WriteBytes(const std::filesystem::path& path, std::span<const uint8_t> bytes)
@@ -245,13 +237,15 @@ void TestGamesAreFoldersImagesAndTitleFiles()
     // TMD or contents, whatever the case of their extensions. Another folder isn't, and neither is one whose only title
     // file is an AppleDouble file, or a folder named like a content. A disc image is a game, by its first bytes. So is
     // a file that LoadGame has a message for, such as a WAD. A sound archive isn't, and neither is a missing file.
-    const std::filesystem::path folder = TempFolder("revosf2_test_games");
+    const xsflib::testing::TempFolder temp("revosf2_test_games");
+    const std::filesystem::path& folder = temp.Path();
     for (const std::filesystem::path& subfolder :
          {folder / "disc" / "sys", folder / "extracted" / "DATA" / "sys", folder / "title", folder / "other",
           folder / "apple_double", folder / "bundle" / "a.app"})
     {
         std::filesystem::create_directories(subfolder);
     }
+
     const std::vector<uint8_t> kArchive = {'R', 'S', 'A', 'R', 0xFE, 0xFF, 0x01, 0x04};
     const std::vector<uint8_t> kRvz = {'R', 'V', 'Z', 0x01};
     WriteBytes(folder / "disc" / "sys" / "main.dol", kArchive);
@@ -275,7 +269,6 @@ void TestGamesAreFoldersImagesAndTitleFiles()
     const bool wad = revosf2::IsGameInput(folder / "title.WAD");
     const bool archive = revosf2::IsGameInput(folder / "a.brsar");
     const bool missing = revosf2::IsGameInput(folder / "missing.iso");
-    std::filesystem::remove_all(folder);
 
     XSFLIB_CHECK(disc && extracted && title);
     XSFLIB_CHECK(!other && !apple_double && !bundle);
@@ -288,7 +281,8 @@ void TestImagesThatRevosf2CantRead()
     // revosf2 reads Wii games, titles and the sound archives in CPKs. It reads no compressed image. Its message for one
     // gives the steps to extract the disc instead. ntdlib's message for an encrypted partition suggests an RVZ image.
     // revosf2's message there gives the same steps. A WAD gets ntdlib's message.
-    const std::filesystem::path folder = TempFolder("revosf2_test_images");
+    const xsflib::testing::TempFolder temp("revosf2_test_images");
+    const std::filesystem::path& folder = temp.Path();
     const std::vector<uint8_t> kRvz = {'R', 'V', 'Z', 0x01};
     WriteBytes(folder / "game.rvz", kRvz);
     WriteBytes(folder / "game.iso", EncryptedWiiImage());
@@ -300,7 +294,6 @@ void TestImagesThatRevosf2CantRead()
     const std::optional<std::string> encrypted = ntdlib::disc::LoadGame(folder / "game.iso", game, options);
     const std::optional<std::string> wad = ntdlib::disc::LoadGame(folder / "title.wad", game, options);
     const std::string encrypted_message = revosf2::GameMessage(encrypted.value_or(""));
-    std::filesystem::remove_all(folder);
 
     XSFLIB_CHECK(options.console == ntdlib::disc::Console::kWii && options.titles && options.cpk_sound_archives);
     XSFLIB_CHECK(rvz && rvz->starts_with("it's an RVZ disc image. revosf2 can't read those. Extract the disc") &&
@@ -316,7 +309,8 @@ void TestGameOutputFolders()
 {
     // A game's output folder is beside the game. It takes the name of the game's folder, or of the image without its
     // extension. A folder given with a separator at its end is the same game.
-    const std::filesystem::path folder = TempFolder("revosf2_test_output");
+    const xsflib::testing::TempFolder temp("revosf2_test_output");
+    const std::filesystem::path& folder = temp.Path();
     std::filesystem::create_directories(folder / "Game");
     WriteBytes(folder / "game.nkit.iso", EncryptedWiiImage());
 
@@ -324,7 +318,6 @@ void TestGameOutputFolders()
     const std::filesystem::path image = revosf2::GamePath(folder / "game.nkit.iso");
     const std::filesystem::path game_output = revosf2::GameOutputFolder(game);
     const std::filesystem::path image_output = revosf2::GameOutputFolder(image);
-    std::filesystem::remove_all(folder);
 
     XSFLIB_CHECK(game.is_absolute() && game == revosf2::GamePath(folder / "Game"));
     XSFLIB_CHECK(game_output == game.parent_path() / "Game_revosf2");
@@ -365,9 +358,8 @@ void CheckPieces(const ntdlib::rsar::SoundArchive& archive, const Settings& sett
 // archive's version gives it.
 void TestArchiveConvertsEverySequence(const char* path, const char* dol)
 {
-    std::ifstream f(path, std::ios::binary);
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
-    if (bytes.empty())
+    std::vector<uint8_t> bytes;
+    if (!xsflib::ReadFile(path, bytes) || bytes.empty())
     {
         std::fprintf(stderr, "can't read %s\n", path);
         failures++;
@@ -377,9 +369,8 @@ void TestArchiveConvertsEverySequence(const char* path, const char* dol)
     std::optional<revosf2::SndBuild> dol_build;
     if (dol)
     {
-        std::ifstream dol_file(dol, std::ios::binary);
-        const std::vector<uint8_t> dol_bytes((std::istreambuf_iterator<char>(dol_file)), {});
-        dol_build = revosf2::ReadSndBuild(dol_bytes);
+        std::vector<uint8_t> dol_bytes;
+        dol_build = xsflib::ReadFile(dol, dol_bytes) ? revosf2::ReadSndBuild(dol_bytes) : std::nullopt;
         if (!dol_build)
         {
             std::fprintf(stderr, "%s shows no build of NW4R SND\n", dol);
@@ -412,6 +403,7 @@ void WriteJAudioGames(const std::filesystem::path& folder)
     std::filesystem::remove_all(folder);
     ntdlib::testing::jaudio_files::WriteGameFiles(folder / "archive");
     ntdlib::testing::jaudio_files::WriteGameFiles(folder / "disc" / "files" / "Audiores");
+
     std::vector<uint8_t> header(ntdlib::disc::kHeaderSize);
     xsflib::StoreBe32(header.data() + ntdlib::disc::kWiiMagicOffset, ntdlib::disc::kWiiMagic);
     const std::vector<uint8_t> kDol = {0x00, 0x00, 0x01, 0x00};

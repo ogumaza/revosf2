@@ -9,8 +9,7 @@
 // game. Music that a game plays as several sequences together converts as one piece (pieces.h). revosf2 also converts
 // the music and sound effects of Wii games that play their sound with JAudio: from the game, or from the game's
 // start-up archive (.baa) with the game's other sound files beside it. ntdlib's converter of JAudio games converts
-// them.
-// Windows accepts files dropped on the executable; macOS uses Revosf2.app.
+// them. Windows accepts files dropped on the executable; macOS uses Revosf2.app.
 
 #include <algorithm>
 #include <cstddef>
@@ -36,6 +35,8 @@
 #include "ntdlib/sequence_export/frame.h"
 #include "ntdlib/sequence_export/jaudio/game.h"
 #include "ntdlib/sequence_export/jaudio/game_input.h"
+#include "ntdlib/sequence_export/jaudio/performance.h"
+#include "ntdlib/sequence_export/performance.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "seqlib/file_name.h"
 #include "xsflib/rip/tool.h"
@@ -106,8 +107,8 @@ struct DolCode
     GameCode code;
 };
 
-// Sets the settings for the sequences of `archive`, read from `input`, and prints which build plays it unless `quiet`
-// is set. `game` is the main.dol of the game that holds the archive, if the input was a game.
+// Sets up the conversion of the sequences of `archive`, read from `input`, and prints which build plays it unless
+// `quiet` is set. `game` is the main.dol of the game that holds the archive, if the input was a game.
 using PrepareArchive =
     std::function<void(const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode* game)>;
 
@@ -258,12 +259,14 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
         }
 
         // The archive's path in the game names it. ConvertInput takes the archive's name from that path and writes to
-        // the archive's folder. `open` reads the archive from the game, with the warnings of an archive's file. An RSAR
-        // archive takes none of the settings' read options.
+        // the archive's folder.
         const std::string& archive_path = archives[a];
         const fs::path archive_input = path / frame::PathFromUtf8(archive_path);
         Options archive_options = options;
         archive_options.output = ArchiveOutput(path, options.output, folders[a]);
+
+        // `open` reads the archive from the game, with the warnings of an archive's file. An RSAR archive takes none of
+        // the settings' read options.
         Converter archive_converter = converter;
         archive_converter.open = [&game, &archive_path](const fs::path&,
                                                         const std::string& archive_name) -> std::optional<SoundArchive>
@@ -276,6 +279,7 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
 
             return frame::LoadArchive<SoundArchive>(std::move(bytes), archive_name, frame::Settings());
         };
+
         archive_converter.prepare = [&prepare, &dol](const fs::path& in_game, const SoundArchive& archive,
                                                      const Options& given, PerformOptions&)
         {
@@ -324,7 +328,6 @@ int Run(const std::vector<std::string>& args, const Converter& converter, const 
 
         return std::nullopt;
     };
-
     return frame::Run(args, converter, other);
 }
 
@@ -365,21 +368,26 @@ int main(int argc, char** argv)
     };
 
     // Each archive plays by the build that its game's main.dol shows, or else by the one its version gives. A game with
-    // a profile sets up the sounds that its code sets up as it starts them.
+    // a profile sets up the sounds that its code sets up as it starts them. The archive's pieces of several sequences
+    // are found once, before its first conversion.
     frame::Settings settings;
     Profile profile = Profile::kNone;
-    const PrepareArchive prepare =
-        [&dol, &settings, &profile](const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode* game)
+    std::vector<revosf2::Piece> pieces;
+    const PrepareArchive prepare = [&dol, &settings, &profile, &pieces](const fs::path& input,
+                                                                        const SoundArchive& archive, bool quiet,
+                                                                        const DolCode* game)
     {
         const GameCode code = ArchiveCode(input, archive, quiet, dol, game);
         settings = frame::RevolutionSettings(code.build.value_or(frame::BuildOfRsarVersion(archive.Version())));
         profile = code.profile;
+        pieces = revosf2::FindPieces(archive);
     };
 
-    // The frame's converter of a loose archive, from frame::MakeArchiveConverter. An input can be a game too. --dol's
-    // main.dol is read before the inputs. Each archive plays by its build and profile.
+    // The frame's converter of a loose archive, from frame::MakeArchiveConverter. An input can be a game too.
     Converter converter = frame::MakeArchiveConverter(program);
     converter.input_word = "input";
+
+    // --dol's main.dol is read before the inputs.
     converter.before_inputs = [&dol]
     {
         if (!dol.path.empty())
@@ -393,6 +401,8 @@ int main(int argc, char** argv)
             }
         }
     };
+
+    // Each archive plays by its build and profile.
     converter.prepare =
         [&prepare](const fs::path& input, const SoundArchive& archive, const Options& options, PerformOptions&)
     {
@@ -401,11 +411,12 @@ int main(int argc, char** argv)
 
     // A piece of several sequences converts as one (pieces.h).
     converter.sequences = revosf2::ArchiveSequences;
-    converter.convert = [&settings, &profile](SoundArchive& archive, std::size_t index, const PerformOptions& perform)
+    converter.convert =
+        [&settings, &profile, &pieces](SoundArchive& archive, std::size_t index, const PerformOptions& perform)
     {
         PerformOptions options = perform;
         revosf2::SetUpSound(profile, archive.Sounds()[index].name, options);
-        if (const std::optional<revosf2::Piece> piece = revosf2::PieceAt(revosf2::FindPieces(archive), index))
+        if (const std::optional<revosf2::Piece> piece = revosf2::PieceAt(pieces, index))
         {
             return frame::ConvertTogether(archive, piece->sounds, piece->name, options, settings, "revosf2");
         }
@@ -421,6 +432,5 @@ int main(int argc, char** argv)
     {
         return Run(args, converter, prepare, games);
     };
-
     return frame::RunMain(argc, argv, run);
 }

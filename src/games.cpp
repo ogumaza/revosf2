@@ -6,12 +6,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <ios>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
+#include "ntdlib/disc/game.h"
 #include "ntdlib/disc/image.h"
 #include "seqlib/file_name.h"
 #include "xsflib/ascii.h"
@@ -68,6 +71,7 @@ ntdlib::disc::GameOptions DiscOptions()
         return "it's " + std::string(format == "RVZ" ? "an " : "a ") + format +
                " disc image. revosf2 can't read those. " + std::string(kExtract);
     };
+
     options.titles = true;
     options.cpk_sound_archives = true;
 

@@ -4,7 +4,13 @@
 
 #include "snd_build.h"
 
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <span>
 #include <system_error>
+
+#include "ntdlib/sound_build.h"
 
 namespace revosf2
 {

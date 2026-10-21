@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// Music that a game plays as several sequences together. A game can start several sequences in one sound frame and
-// play them as one piece. revosf2 converts such a piece to one MIDI file, one SoundFont and one set of SFZ files
-// (ntdlib's ConvertTogether).
+// Music that a game plays as several sequences together. A game can start several sequences in one sound frame and play
+// them as one piece. revosf2 converts such a piece to one MIDI file, one SoundFont and one set of SFZ files (ntdlib's
+// ConvertTogether).
 //
 // Mega Man 9 plays each piece of its music as four sequences, one for each channel of the NES's sound chip: the two
 // pulse channels, the triangle and the noise. Their labels are one name followed by "_S1", "_S2", "_TR" and "_NO". The
