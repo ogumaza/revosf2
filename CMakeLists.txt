@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The version is revosf2 --version's, and the one in the file properties of the Windows program and the Info.plist of
 # the macOS app. A release changes it here and adds its notes in docs/release-notes/.
-project(revosf2 VERSION 1.3.1 LANGUAGES CXX)
+project(revosf2 VERSION 1.3.2 LANGUAGES CXX)
 
 # seqlib writes the MIDI and SoundFont files. xsflib holds the code that the converters share with the PSF players.
 # ntdlib holds the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.
@@ -49,6 +49,13 @@ if(BUILD_TESTING)
   # It rejects a --dol file without AX's microcode, before it converts anything.
   add_test(NAME revosf2_dol_check COMMAND revosf2 --dol "${PROJECT_SOURCE_DIR}/LICENSE" missing.brsar)
   set_tests_properties(revosf2_dol_check PROPERTIES PASS_REGULAR_EXPRESSION "holds no AX microcode")
+
+  # It rejects a weather and a museum arrangement that Animal Crossing: City Folk doesn't have.
+  add_test(NAME revosf2_weather_check COMMAND revosf2 --weather hail missing.brsar)
+  add_test(NAME revosf2_museum_check COMMAND revosf2 --museum 0 missing.brsar)
+  set_tests_properties(revosf2_weather_check PROPERTIES
+                       PASS_REGULAR_EXPRESSION "--weather requires fine, rain or snow, not hail")
+  set_tests_properties(revosf2_museum_check PROPERTIES PASS_REGULAR_EXPRESSION "--museum 0 is out of range")
 
   # It converts a Wii game that plays its music with JAudio: from the game's start-up archive with its other sound
   # files beside it, and from an extracted disc that holds them and no sound archive. revosf2_test writes both. ctest

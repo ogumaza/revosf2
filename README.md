@@ -24,6 +24,10 @@ revosf2 [options] <archive.brsar> [<archive.brsar> ...]
   --dol FILE     the game's main.dol, for the build of the game's sound library
                  (default: the game's main.dol when the input is a game, or
                  sys/main.dol of the extracted disc that holds the archive)
+  --weather W    the weather of Animal Crossing: City Folk's hourly and town
+                 music: fine, rain or snow (default fine)
+  --museum N     the arrangement of City Folk's museum music, from 1 to 7
+                 (default 1)
   --list         list sequences without converting
   --quiet        print errors only
   --version      show the version
@@ -43,9 +47,12 @@ its version. revosf2 notes that for an archive older than version 1.4.
 Animal Crossing: City Folk sets up its music as each piece starts. Given the game's `main.dol`
 (the USA release), revosf2 does the same. Each hourly piece and each piece of town music plays
 the tracks that the game plays in fine weather. The game silences the piece's other tracks. Rain
-and snow play other sets of tracks. In the MIDI files, a silenced track keeps its notes at
-CC11 0. The museum's music plays the tracks of the room that the game starts it in. CC91 holds
-the sends that the game's code gives the music. revosf2 notes when it plays an archive this way.
+and snow play other sets of tracks. `--weather rain` and `--weather snow` play those sets. In
+the MIDI files, a silenced track keeps its notes at CC11 0. The museum's music has seven
+arrangements. The game picks one by room and starts the music in the first. So does revosf2.
+`--museum 2` to `--museum 7` play the others. Arrangements 2 and 3 play the same tracks. CC91
+holds the sends that the game's code gives the music. revosf2 notes when it plays an archive
+this way.
 
 Mega Man 9 (WiiWare) plays each piece of its music as four sequences, one for each channel of
 the NES's sound chip. The game starts the four together. Their names are the piece's name
@@ -562,10 +569,10 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 Animal Crossing: City Folk and the search for Mega Man 9's pieces by their sequences' names. It
 checks which inputs are games, the messages for disc images that revosf2 can't read, and the
 output folders of games. It checks that the program reports its version, and rejects a variable
-that the game doesn't have and a `--dol` file without AX's microcode. It converts a small
-JAudio2 game that the test program writes, from its start-up archive and from an extracted disc.
-The conversion's unit tests are in the seqlib and ntdlib libraries. They run on synthetic files,
-without game data.
+that the game doesn't have and a `--dol` file without AX's microcode. It also rejects a weather
+and a museum arrangement that City Folk doesn't have. It converts a small JAudio2 game that the
+test program writes, from its start-up archive and from an extracted disc. The conversion's unit
+tests are in the seqlib and ntdlib libraries. They run on synthetic files, without game data.
 
 Other checks and tools:
 

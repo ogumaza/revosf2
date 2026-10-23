@@ -51,11 +51,13 @@ namespace frame = ntdlib::sequence_export;
 namespace jaudio = ntdlib::sequence_export::jaudio;
 using ntdlib::rsar::SoundArchive;
 using ntdlib::sequence_export::PerformOptions;
+using revosf2::Arrangements;
 using revosf2::FindMainDol;
 using revosf2::Profile;
 using revosf2::ProfileOf;
 using revosf2::ReadSndBuild;
 using revosf2::SndBuild;
+using revosf2::Weather;
 
 namespace
 {
@@ -171,13 +173,6 @@ GameCode ArchiveCode(const fs::path& input, const SoundArchive& archive, bool qu
     {
         std::fprintf(stderr, "note: %s plays as NW4R SND's %s do, by the game's main.dol (%s)\n", name.c_str(),
                      RulesOf(*dol.code.build), dol.path.c_str());
-        if (dol.code.profile == Profile::kCityFolk)
-        {
-            std::fprintf(stderr,
-                         "note: %s plays its music as Animal Crossing: City Folk starts it in fine weather. Tracks "
-                         "that the game silences get CC11 0. CC91 adds the game's sends to its reverb.\n",
-                         name.c_str());
-        }
     }
     else if (dol.path.empty() && archive.Version() < 0x0104)
     {
@@ -188,6 +183,44 @@ GameCode ArchiveCode(const fs::path& input, const SoundArchive& archive, bool qu
     }
 
     return dol.code;
+}
+
+// The words for `weather` in the note on City Folk's music.
+const char* WeatherWords(Weather weather)
+{
+    switch (weather)
+    {
+    case Weather::kFine:
+        return "fine weather";
+    case Weather::kRain:
+        return "rain";
+    case Weather::kSnow:
+        return "snow";
+    }
+
+    return "";
+}
+
+// Notes how the archive named `name` plays its music by `profile`, in `arrangements`. `chosen` is set when --weather or
+// --museum gives the arrangements. They change nothing in an archive without City Folk's profile. The note says so.
+void NoteProfile(const std::string& name, Profile profile, const Arrangements& arrangements, bool chosen)
+{
+    if (profile == Profile::kCityFolk)
+    {
+        std::fprintf(stderr,
+                     "note: %s plays its music as Animal Crossing: City Folk starts it in %s. The museum's music plays "
+                     "arrangement %d of %d. --weather and --museum choose the others. Tracks that the game silences "
+                     "get CC11 0. CC91 adds the game's sends to its reverb.\n",
+                     name.c_str(), WeatherWords(arrangements.weather), arrangements.museum,
+                     revosf2::kMuseumArrangements);
+    }
+    else if (chosen)
+    {
+        std::fprintf(stderr,
+                     "note: --weather and --museum change nothing in %s. They apply only with the main.dol of "
+                     "Animal Crossing: City Folk (USA).\n",
+                     name.c_str());
+    }
 }
 
 // The folder that an archive of the game at `game` writes to: `folder` in --output's folder (`output`), or else in the
@@ -352,15 +385,47 @@ int main(int argc, char** argv)
     program.extra_options =
         "  --dol FILE     the game's main.dol, for the build of the game's sound library\n"
         "                 (default: the game's main.dol when the input is a game, or\n"
-        "                 sys/main.dol of the extracted disc that holds the archive)\n";
+        "                 sys/main.dol of the extracted disc that holds the archive)\n"
+        "  --weather W    the weather of Animal Crossing: City Folk's hourly and town\n"
+        "                 music: fine, rain or snow (default fine)\n"
+        "  --museum N     the arrangement of City Folk's museum music, from 1 to 7\n"
+        "                 (default 1)\n";
 
-    // --dol names the game's main.dol. The build that it shows plays every archive.
+    // --dol names the game's main.dol. The build that it shows plays every archive. --weather and --museum choose the
+    // arrangements of City Folk's music.
     DolCode dol;
-    program.option = [&dol](const std::string& option, frame::OptionReader& reader, PerformOptions& perform)
+    Arrangements arrangements;
+    bool chose_arrangements = false;
+    program.option = [&dol, &arrangements, &chose_arrangements](const std::string& option, frame::OptionReader& reader,
+                                                                PerformOptions& perform)
     {
         if (option == "--dol")
         {
             dol.path = reader.Value();
+            return true;
+        }
+        if (option == "--weather")
+        {
+            const std::string value = reader.Value();
+            const std::optional<Weather> weather = revosf2::WeatherNamed(value);
+            if (!weather)
+            {
+                throw std::runtime_error("--weather requires fine, rain or snow, not " + value);
+            }
+
+            arrangements.weather = *weather;
+            chose_arrangements = true;
+            return true;
+        }
+        if (option == "--museum")
+        {
+            arrangements.museum = static_cast<int>(reader.Number(revosf2::kMuseumArrangements));
+            if (arrangements.museum == 0)
+            {
+                throw std::runtime_error("--museum 0 is out of range");
+            }
+
+            chose_arrangements = true;
             return true;
         }
 
@@ -373,11 +438,16 @@ int main(int argc, char** argv)
     frame::Settings settings;
     Profile profile = Profile::kNone;
     std::vector<revosf2::Piece> pieces;
-    const PrepareArchive prepare = [&dol, &settings, &profile, &pieces](const fs::path& input,
-                                                                        const SoundArchive& archive, bool quiet,
-                                                                        const DolCode* game)
+    const PrepareArchive prepare =
+        [&dol, &arrangements, &chose_arrangements, &settings, &profile, &pieces](
+            const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode* game)
     {
         const GameCode code = ArchiveCode(input, archive, quiet, dol, game);
+        if (!quiet)
+        {
+            NoteProfile(frame::Utf8(input.filename()), code.profile, arrangements, chose_arrangements);
+        }
+
         settings = frame::RevolutionSettings(code.build.value_or(frame::BuildOfRsarVersion(archive.Version())));
         profile = code.profile;
         pieces = revosf2::FindPieces(archive);
@@ -411,11 +481,11 @@ int main(int argc, char** argv)
 
     // A piece of several sequences converts as one (pieces.h).
     converter.sequences = revosf2::ArchiveSequences;
-    converter.convert =
-        [&settings, &profile, &pieces](SoundArchive& archive, std::size_t index, const PerformOptions& perform)
+    converter.convert = [&settings, &profile, &arrangements, &pieces](SoundArchive& archive, std::size_t index,
+                                                                      const PerformOptions& perform)
     {
         PerformOptions options = perform;
-        revosf2::SetUpSound(profile, archive.Sounds()[index].name, options);
+        revosf2::SetUpSound(profile, arrangements, archive.Sounds()[index].name, options);
         if (const std::optional<revosf2::Piece> piece = revosf2::PieceAt(pieces, index))
         {
             return frame::ConvertTogether(archive, piece->sounds, piece->name, options, settings, "revosf2");

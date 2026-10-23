@@ -107,12 +107,12 @@ void TestCityFolkSetsUpItsMusic()
 {
     // Another game's main.dol selects no profile. With City Folk's profile, each hourly piece and each piece of town
     // music plays the tracks that the game plays in fine weather, and sends 0.25 to bus A. The town music leaves out
-    // track 15 too. The museum's music plays the tracks of its first room, without a send. K.K. Slider's songs play
-    // every track and send 0.28. The profile leaves the other sounds as they are.
+    // track 15 too. The museum's music plays the tracks of its first arrangement, without a send. K.K. Slider's songs
+    // play every track and send 0.28. The profile leaves the other sounds as they are.
     const auto set_up = [](revosf2::Profile profile, std::string_view sound)
     {
         ntdlib::sequence_export::PerformOptions options;
-        revosf2::SetUpSound(profile, sound, options);
+        revosf2::SetUpSound(profile, {}, sound, options);
         return std::pair(options.tracks, options.fx_sends);
     };
 
@@ -132,6 +132,49 @@ void TestCityFolkSetsUpItsMusic()
     XSFLIB_CHECK(song == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.28f, 0.0f, 0.0f}));
     XSFLIB_CHECK(first_town == std::pair(uint16_t{0xffff}, kNoSends));
     XSFLIB_CHECK(without == std::pair(uint16_t{0xffff}, kNoSends));
+}
+
+void TestCityFolkPlaysTheOtherArrangements()
+{
+    // In rain and snow, each hourly piece and each piece of town music plays the tracks of the weather's mask, with
+    // the same send. The town music leaves out track 15 in every weather. --museum N plays the tracks of the museum's
+    // arrangement N. The weather leaves the museum's music and the songs as they are, and the museum's arrangement
+    // leaves the other music as it is.
+    const auto set_up = [](revosf2::Weather weather, int museum, std::string_view sound)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        revosf2::SetUpSound(revosf2::Profile::kCityFolk, {weather, museum}, sound, options);
+        return std::pair(options.tracks, options.fx_sends[0]);
+    };
+
+    const auto rain = set_up(revosf2::Weather::kRain, 1, "BGM_OUTDOOR_08");
+    const auto snow = set_up(revosf2::Weather::kSnow, 1, "BGM_OUTDOOR_08");
+    const auto town_rain = set_up(revosf2::Weather::kRain, 1, "BGM_TOWN_EARLY");
+    const auto town_snow = set_up(revosf2::Weather::kSnow, 1, "BGM_TOWN_EARLY");
+    const auto museum_in_snow = set_up(revosf2::Weather::kSnow, 1, "BGM_MUSEUM");
+    const auto song_in_snow = set_up(revosf2::Weather::kSnow, 1, "BGM_KK04_SWING");
+    const auto museum_4 = set_up(revosf2::Weather::kFine, 4, "BGM_MUSEUM");
+    const auto museum_7 = set_up(revosf2::Weather::kFine, 7, "BGM_MUSEUM");
+    const auto hourly_with_museum_7 = set_up(revosf2::Weather::kFine, 7, "BGM_OUTDOOR_08");
+
+    XSFLIB_CHECK(rain == std::pair(uint16_t{0x05c3}, 0.25f));
+    XSFLIB_CHECK(snow == std::pair(uint16_t{0xa5c3}, 0.25f));
+    XSFLIB_CHECK(town_rain == std::pair(uint16_t{0x4600}, 0.25f));
+    XSFLIB_CHECK(town_snow == std::pair(uint16_t{0x6600}, 0.25f));
+    XSFLIB_CHECK(museum_in_snow == std::pair(uint16_t{0x00e7}, 0.0f));
+    XSFLIB_CHECK(song_in_snow == std::pair(uint16_t{0xffff}, 0.28f));
+    XSFLIB_CHECK(museum_4 == std::pair(uint16_t{0x1863}, 0.0f));
+    XSFLIB_CHECK(museum_7 == std::pair(uint16_t{0x0700}, 0.0f));
+    XSFLIB_CHECK(hourly_with_museum_7 == std::pair(uint16_t{0x447f}, 0.25f));
+}
+
+void TestWeathersHaveNames()
+{
+    // --weather takes the names of the three weathers. Any other name is no weather.
+    XSFLIB_CHECK(revosf2::WeatherNamed("fine") == revosf2::Weather::kFine);
+    XSFLIB_CHECK(revosf2::WeatherNamed("rain") == revosf2::Weather::kRain);
+    XSFLIB_CHECK(revosf2::WeatherNamed("snow") == revosf2::Weather::kSnow);
+    XSFLIB_CHECK(!revosf2::WeatherNamed("Rain") && !revosf2::WeatherNamed("hail") && !revosf2::WeatherNamed(""));
 }
 
 void TestPiecesAreFoundByTheirLabels()
@@ -427,6 +470,8 @@ int main(int argc, char** argv)
     TestMainDolShowsTheBuild();
     TestMainDolIsFoundBesideTheFiles();
     TestCityFolkSetsUpItsMusic();
+    TestCityFolkPlaysTheOtherArrangements();
+    TestWeathersHaveNames();
     TestPiecesAreFoundByTheirLabels();
     TestNovember2008LowPassSteps();
     TestGamesAreFoldersImagesAndTitleFiles();
