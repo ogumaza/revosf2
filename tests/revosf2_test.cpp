@@ -168,6 +168,39 @@ void TestCityFolkPlaysTheOtherArrangements()
     XSFLIB_CHECK(hourly_with_museum_7 == std::pair(uint16_t{0x447f}, 0.25f));
 }
 
+void TestCityFolkStepsItsGyroids()
+{
+    // One frame after a gyroid's sound starts, the music takes its next step: variable 18 goes from 0 to 1. From --var
+    // 18=15, the step wraps to 0. The game's count does the same. The profile changes no variable of the music, and
+    // without the profile a gyroid's sound changes none.
+    const auto set_up = [](revosf2::Profile profile, std::string_view sound, std::optional<int16_t> start)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        if (start)
+        {
+            options.variables[18] = *start;
+        }
+
+        revosf2::SetUpSound(profile, {}, sound, options);
+        return options.changes;
+    };
+
+    const auto is_step = [](const std::vector<ntdlib::sequence_export::VariableChange>& changes, int16_t value)
+    {
+        return changes.size() == 1 && changes[0].frame == 1 && changes[0].index == 18 && changes[0].value == value;
+    };
+
+    const auto gyroid = set_up(revosf2::Profile::kCityFolk, "SEQ_HNW_BCN_DKA", std::nullopt);
+    const auto last_step = set_up(revosf2::Profile::kCityFolk, "SEQ_HNW_BCN_DKA", 15);
+    const auto music = set_up(revosf2::Profile::kCityFolk, "BGM_OUTDOOR_08", std::nullopt);
+    const auto without = set_up(revosf2::Profile::kNone, "SEQ_HNW_BCN_DKA", std::nullopt);
+
+    XSFLIB_CHECK(is_step(gyroid, 1));
+    XSFLIB_CHECK(is_step(last_step, 0));
+    XSFLIB_CHECK(music.empty());
+    XSFLIB_CHECK(without.empty());
+}
+
 void TestWeathersHaveNames()
 {
     // --weather takes the names of the three weathers. Any other name is no weather.
@@ -471,6 +504,7 @@ int main(int argc, char** argv)
     TestMainDolIsFoundBesideTheFiles();
     TestCityFolkSetsUpItsMusic();
     TestCityFolkPlaysTheOtherArrangements();
+    TestCityFolkStepsItsGyroids();
     TestWeathersHaveNames();
     TestPiecesAreFoundByTheirLabels();
     TestNovember2008LowPassSteps();

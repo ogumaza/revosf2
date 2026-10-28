@@ -51,8 +51,10 @@ and snow play other sets of tracks. `--weather rain` and `--weather snow` play t
 the MIDI files, a silenced track keeps its notes at CC11 0. The museum's music has seven
 arrangements. The game picks one by room and starts the music in the first. So does revosf2.
 `--museum 2` to `--museum 7` play the others. Arrangements 2 and 3 play the same tracks. CC91
-holds the sends that the game's code gives the music. revosf2 notes when it plays an archive
-this way.
+holds the sends that the game's code gives the music. The gyroids' sounds play in step with the
+music. The game counts the music's steps. A gyroid's sound plays a step each time the count
+changes. revosf2 plays one step of each: the count changes one frame after the sound starts.
+revosf2 notes when it plays an archive this way.
 
 Mega Man 9 (WiiWare) plays each piece of its music as four sequences, one for each channel of
 the NES's sound chip. The game starts the four together. Their names are the piece's name
@@ -135,11 +137,18 @@ in them.
 JAudio2 times its music for the GameCube's rate of about 32,028 Hz. The Wii plays it at
 32,000 Hz. There the music plays 0.089% slower and 1.5 cents lower than in the files.
 
+Programs 0xf0 and up play the DSP's built-in oscillators. The square wave, the sawtooth, the
+pulse of 25% duty, the triangle and the sine become looping samples of one cycle, one for each
+program. Each preset of such a program has one zone, for every key and velocity. The zone holds
+the oscillators' envelope: full volume until the release, then a fall to silence over about
+17 ms. The DSP changes its noise and its ramp as it plays. No sample can hold them.
+
 MIDI and SoundFont can't hold everything that JAudio2 does. The fitted envelopes can't follow an
 oscillator's table that rises again or loops. Random instrument effects play at their base
-values. Tremolos, track filters, pitch envelopes and notes on the DSP's built-in oscillators are
-left out. A vibrato deeper than a semitone is kept to a semitone. revosf2 reports each of these
-for each sequence. The game plays a limited number of notes at once. revosf2 keeps every note.
+values. Tremolos, track filters, pitch envelopes and notes on the DSP's noise, ramp and other
+oscillators that no sample can hold are left out. A vibrato deeper than a semitone is kept to a
+semitone. revosf2 reports each of these for each sequence. The game plays a limited number of
+notes at once. revosf2 keeps every note.
 
 ## Downloads
 
@@ -364,7 +373,7 @@ Regions match the SoundFont, with these differences:
 - **Loops.** sfizz crossfades the loop end with data before the loop start over at least 1 ms.
   Samples include 4 ms of repeated loop data before the start. The crossfade is then inaudible.
 
-Three sfizz 1.2.3 quirks affect playback:
+Four sfizz 1.2.3 quirks affect playback:
 
 - **Decays and releases.** sfizz ends them sooner than the documentation's curve. Over the
   specified time, sfizz falls by a factor of e^-9: 78.17 dB. Where the game has fallen 40 dB,
@@ -375,6 +384,10 @@ Three sfizz 1.2.3 quirks affect playback:
 - **Streaming.** During offline rendering, streamed samples can fall silent after their
   preloaded portion. The files request full loading with `hint_ram_based=1`. sfizz prints
   "Unsupported value for hint_stealing: 1" for this; the message is harmless.
+- **Mono samples.** sfizz pans a mono sample by the sin/cos law and then raises both sides by
+  3 dB. Every sample of the files is mono. Every region therefore plays 3.0 dB above the game's
+  level, at every pan. The balance of the mix stays the same. Lowering sfizz's volume by 3 dB
+  gives the game's level.
 
 The opcodes follow their documentation at sfzformat.com, with these exceptions:
 
@@ -565,14 +578,15 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 ## Tests and tools
 
 `ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
-`main.dol` beside an archive, the low-pass of the builds from November 2008, the music set-up of
-Animal Crossing: City Folk and the search for Mega Man 9's pieces by their sequences' names. It
-checks which inputs are games, the messages for disc images that revosf2 can't read, and the
-output folders of games. It checks that the program reports its version, and rejects a variable
-that the game doesn't have and a `--dol` file without AX's microcode. It also rejects a weather
-and a museum arrangement that City Folk doesn't have. It converts a small JAudio2 game that the
-test program writes, from its start-up archive and from an extracted disc. The conversion's unit
-tests are in the seqlib and ntdlib libraries. They run on synthetic files, without game data.
+`main.dol` beside an archive, the low-pass of the builds from November 2008, the set-up of
+Animal Crossing: City Folk's music and gyroids and the search for Mega Man 9's pieces by their
+sequences' names. It checks which inputs are games, the messages for disc images that revosf2
+can't read, and the output folders of games. It checks that the program reports its version, and
+rejects a variable that the game doesn't have and a `--dol` file without AX's microcode. It also
+rejects a weather and a museum arrangement that City Folk doesn't have. It converts a small
+JAudio2 game that the test program writes, from its start-up archive and from an extracted disc.
+The conversion's unit tests are in the seqlib and ntdlib libraries. They run on synthetic files,
+without game data.
 
 Other checks and tools:
 

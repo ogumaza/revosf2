@@ -72,8 +72,25 @@ constexpr uint16_t kTownTrack15 = 0x8000;
 constexpr float kMusicSend = 0.25f;
 constexpr float kSongSend = 0.28f;
 
+// The gyroids' sounds (SEQ_HNW_*) play in step with the music. The game counts the music's steps in its global variable
+// 2, a sequence's variable 18. The start of the music sets the count to 0 (0x801d4510, from 0x801cbc74). 0x801d4384
+// reads the music's tick and adds 1 to the count each time the tick passes a step. After 15, the count goes back to 0
+// (0x801d445c to 0x801d4494). A gyroid's sequence copies the variable as it starts. The sequence plays a step each time
+// the variable changes. The profile plays one step: one frame after the start, the variable takes the count's next
+// value. Without --var, the Wii's global variables start at 0.
+constexpr uint8_t kStepVariable = 18;
+constexpr int16_t kLastStep = 15;
+
 void SetUpCityFolkSound(const Arrangements& arrangements, std::string_view sound, PerformOptions& perform)
 {
+    if (sound.starts_with("SEQ_HNW_"))
+    {
+        const auto given = perform.variables.find(kStepVariable);
+        const int step = given == perform.variables.end() ? 0 : given->second;
+        const int16_t next = step < kLastStep ? static_cast<int16_t>(step + 1) : int16_t{0};
+        perform.changes.push_back({.frame = 1, .index = kStepVariable, .value = next});
+        return;
+    }
     if (sound.starts_with("BGM_KK"))
     {
         perform.fx_sends[0] = kSongSend;

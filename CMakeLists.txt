@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The version is revosf2 --version's, and the one in the file properties of the Windows program and the Info.plist of
 # the macOS app. A release changes it here and adds its notes in docs/release-notes/.
-project(revosf2 VERSION 1.3.2 LANGUAGES CXX)
+project(revosf2 VERSION 1.3.3 LANGUAGES CXX)
 
 # seqlib writes the MIDI and SoundFont files. xsflib holds the code that the converters share with the PSF players.
 # ntdlib holds the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.

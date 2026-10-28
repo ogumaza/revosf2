@@ -48,7 +48,8 @@ std::optional<Weather> WeatherNamed(std::string_view name);
 Profile ProfileOf(std::span<const uint8_t> dol);
 
 // Sets up the performance of the sound named `sound` as the game of `profile` starts it, in `arrangements`: the tracks
-// that sound and the sound's sends. A sound that the game starts as the archive gives it keeps `perform` as it is.
+// that sound, the sound's sends, and the changes of variables that the game's code makes while the sound plays. A sound
+// that the game starts as the archive gives it keeps `perform` as it is.
 void SetUpSound(Profile profile, const Arrangements& arrangements, std::string_view sound,
                 ntdlib::sequence_export::PerformOptions& perform);
 
