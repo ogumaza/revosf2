@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -63,8 +64,9 @@ namespace
 void TestMainDolShowsTheBuild()
 {
     // AX of October 2006 transfers 0x120-byte parameter blocks. It comes with NW4R SND's build of 2006. That build has
-    // no banner. A later AX transfers 0x140 bytes, and NW4R SND's banner dates the build. A file without AX's microcode
-    // shows nothing.
+    // no banner. A later AX transfers 0x140 bytes, and NW4R SND's banner dates the build. A build without a banner
+    // plays as the build of October 2006 with a later AX too. The voices follow AX: 64 in AX of October 2006, and 96 in
+    // a later AX. A file without AX's microcode shows nothing.
     const std::vector<uint8_t> kNoMicrocode(0x3000, 0);
 
     const std::optional<revosf2::SndBuild> old_build = revosf2::ReadSndBuild(MicrocodeDol(0x120, ""));
@@ -72,6 +74,7 @@ void TestMainDolShowsTheBuild()
         MicrocodeDol(0x140, "<< NW4R    - SND \tfinal   build: Mar  8 2008 10:59:21 (0x4302_145) >>"));
     const std::optional<revosf2::SndBuild> june = revosf2::ReadSndBuild(
         MicrocodeDol(0x140, "<< NW4R    - SND \tfinal   build: Jun 20 2008 11:01:02 (0x4302_158) >>"));
+    const std::optional<revosf2::SndBuild> later_ax = revosf2::ReadSndBuild(MicrocodeDol(0x140, ""));
     const std::optional<revosf2::SndBuild> no_microcode = revosf2::ReadSndBuild(kNoMicrocode);
     const std::optional<revosf2::SndBuild> empty = revosf2::ReadSndBuild({});
 
@@ -79,7 +82,14 @@ void TestMainDolShowsTheBuild()
     XSFLIB_CHECK(march && !march->October2006() && march->date == 20080308 && march->SinceMarch2008() &&
                  !march->SinceJune2008());
     XSFLIB_CHECK(june && !june->October2006() && june->date == 20080620 && june->SinceJune2008());
+    XSFLIB_CHECK(later_ax && later_ax->October2006() && later_ax->date == 0 && !later_ax->SinceMarch2008());
     XSFLIB_CHECK(!no_microcode && !empty);
+
+    XSFLIB_CHECK(revosf2::ReadAxVoices(MicrocodeDol(0x120, "")) == 64);
+    XSFLIB_CHECK(revosf2::ReadAxVoices(MicrocodeDol(0x140, "")) == 96);
+    XSFLIB_CHECK(revosf2::ReadAxVoices(MicrocodeDol(
+                     0x140, "<< NW4R    - SND \tfinal   build: Mar  8 2008 10:59:21 (0x4302_145) >>")) == 96);
+    XSFLIB_CHECK(!revosf2::ReadAxVoices(kNoMicrocode) && !revosf2::ReadAxVoices({}));
 }
 
 void TestMainDolIsFoundBesideTheFiles()
@@ -132,6 +142,76 @@ void TestCityFolkSetsUpItsMusic()
     XSFLIB_CHECK(song == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.28f, 0.0f, 0.0f}));
     XSFLIB_CHECK(first_town == std::pair(uint16_t{0xffff}, kNoSends));
     XSFLIB_CHECK(without == std::pair(uint16_t{0xffff}, kNoSends));
+}
+
+void TestWiiPlayMutesTracks()
+{
+    // With Wii Play's profile, Pose Mii's music for play plays track 0 alone. Table Tennis's two pieces play the tracks
+    // that the game starts them with: tracks 0 to 6, and tracks 0, 1, 2, 4, 5, 6 and 14. The profile leaves the other
+    // sounds as they are, and so does another game's profile.
+    const auto tracks = [](revosf2::Profile profile, std::string_view sound)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        revosf2::SetUpSound(profile, {}, sound, options);
+        return options.tracks;
+    };
+
+    XSFLIB_CHECK(tracks(revosf2::Profile::kWiiPlay, "RP_BOM_BGM_PLAY") == 0x0001);
+    XSFLIB_CHECK(tracks(revosf2::Profile::kWiiPlay, "RP_PNP_BGM_PLAY") == 0x007f);
+    XSFLIB_CHECK(tracks(revosf2::Profile::kWiiPlay, "RP_PNP_BGM_PLAY_VS") == 0x4077);
+    XSFLIB_CHECK(tracks(revosf2::Profile::kWiiPlay, "BGM_OUTDOOR_08") == 0xffff);
+    XSFLIB_CHECK(tracks(revosf2::Profile::kCityFolk, "RP_BOM_BGM_PLAY") == 0xffff);
+    XSFLIB_CHECK(tracks(revosf2::Profile::kNone, "RP_BOM_BGM_PLAY") == 0xffff);
+}
+
+void TestChannelsSetUpTheirSounds()
+{
+    // With the Mii Channel's profile, the music plays every track but 10 and 11, and each other sound sends 0.2 to bus
+    // A. Every sound of both channels takes its tracks' sends on bus B to 0. The Mii Channel's music converts once more
+    // in each of three other sets of tracks. The Wii Shop Channel leaves the tracks and bus A as the archive gives
+    // them, and has no variants.
+    const auto set_up = [](revosf2::Profile profile, std::string_view sound)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        revosf2::SetUpSound(profile, {}, sound, options);
+        return std::pair(options.tracks, options.fx_sends);
+    };
+
+    const auto music = set_up(revosf2::Profile::kMiiChannel, "SEQ_TMP_BGM");
+    const auto effect = set_up(revosf2::Profile::kMiiChannel, "SEQ_OK");
+    const auto shop = set_up(revosf2::Profile::kWiiShopChannel, "WIPL_BGM_SHOP");
+    const std::span<const revosf2::Variant> scenes = revosf2::VariantsOf(revosf2::Profile::kMiiChannel, false);
+
+    XSFLIB_CHECK(music == std::pair(uint16_t{0xf3ff}, std::array<float, 3>{0.0f, -1.0f, 0.0f}));
+    XSFLIB_CHECK(effect == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.2f, -1.0f, 0.0f}));
+    XSFLIB_CHECK(shop == std::pair(uint16_t{0xffff}, std::array<float, 3>{0.0f, -1.0f, 0.0f}));
+    XSFLIB_CHECK(revosf2::VariantsOf(revosf2::Profile::kWiiShopChannel, false).empty());
+    XSFLIB_CHECK(scenes.size() == 3);
+    if (scenes.size() == 3)
+    {
+        XSFLIB_CHECK(scenes[0].sound == "SEQ_TMP_BGM" && scenes[0].suffix == "_scene_4" && scenes[0].tracks == 0xf5ff);
+        XSFLIB_CHECK(scenes[1].sound == "SEQ_TMP_BGM" && scenes[1].suffix == "_menu_out" && scenes[1].tracks == 0xfbff);
+        XSFLIB_CHECK(scenes[2].sound == "SEQ_TMP_BGM" && scenes[2].suffix == "_scenes_1_and_3" &&
+                     scenes[2].tracks == 0xf1ff);
+    }
+}
+
+void TestWiiSportsSetsTheWind()
+{
+    // Golf's wind plays at a speed of 8 and in direction 0, unless --var gives its variables. No other sound gets a
+    // variable, and the profile has no variants.
+    const auto variables = [](std::string_view sound, std::map<uint8_t, int16_t> given)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        options.variables = std::move(given);
+        revosf2::SetUpSound(revosf2::Profile::kWiiSports, {}, sound, options);
+        return options.variables;
+    };
+
+    XSFLIB_CHECK((variables("SE_LV_Wind", {}) == std::map<uint8_t, int16_t>{{0, 8}, {1, 0}}));
+    XSFLIB_CHECK((variables("SE_LV_Wind", {{0, 15}}) == std::map<uint8_t, int16_t>{{0, 15}, {1, 0}}));
+    XSFLIB_CHECK(variables("SE_TR_FlagHit", {}).empty());
+    XSFLIB_CHECK(revosf2::VariantsOf(revosf2::Profile::kWiiSports, false).empty());
 }
 
 void TestCityFolkPlaysTheOtherArrangements()
@@ -199,6 +279,40 @@ void TestCityFolkStepsItsGyroids()
     XSFLIB_CHECK(is_step(last_step, 0));
     XSFLIB_CHECK(music.empty());
     XSFLIB_CHECK(without.empty());
+}
+
+void TestMarioKartSetsItsEffectsVariable()
+{
+    // With Mario Kart Wii's profile, six sound effects start with variable 0 at the value of their first play in the
+    // game: 1 for SE_RC_RANK_UP, 0 for the other five. SE_CC_MSR_GATE_PASS keeps -1, the value without a variable.
+    // --var gives another value. Without the profile, the effects set no variable.
+    const auto variables = [](revosf2::Profile profile, std::string_view sound, std::optional<int16_t> given)
+    {
+        ntdlib::sequence_export::PerformOptions options;
+        if (given)
+        {
+            options.variables[0] = *given;
+        }
+
+        revosf2::SetUpSound(profile, {}, sound, options);
+        return options.variables;
+    };
+    const auto first = [&variables](std::string_view sound, int16_t value)
+    {
+        const auto set = variables(revosf2::Profile::kMarioKart, sound, std::nullopt);
+        return set.size() == 1 && set.contains(0) && set.at(0) == value;
+    };
+
+    XSFLIB_CHECK(first("SE_CN_RBW_RING", 0));
+    XSFLIB_CHECK(first("SE_CN_RBW_STAR_RING", 0));
+    XSFLIB_CHECK(first("SE_RC_RANK_UP", 1));
+    XSFLIB_CHECK(first("SE_RC_RANK_DOWN", 0));
+    XSFLIB_CHECK(first("SE_UI_BTN_OK", 0));
+    XSFLIB_CHECK(first("SE_UI_CTRL_ON", 0));
+    XSFLIB_CHECK(variables(revosf2::Profile::kMarioKart, "SE_CC_MSR_GATE_PASS", std::nullopt).empty());
+    XSFLIB_CHECK(variables(revosf2::Profile::kMarioKart, "SEQ_O_SELECT", std::nullopt).empty());
+    XSFLIB_CHECK(variables(revosf2::Profile::kMarioKart, "SE_RC_RANK_UP", 5).at(0) == 5);
+    XSFLIB_CHECK(variables(revosf2::Profile::kNone, "SE_RC_RANK_UP", std::nullopt).empty());
 }
 
 void TestWeathersHaveNames()
@@ -443,10 +557,15 @@ void TestArchiveConvertsEverySequence(const char* path, const char* dol)
     }
 
     std::optional<revosf2::SndBuild> dol_build;
+    std::optional<int> dol_voices;
     if (dol)
     {
         std::vector<uint8_t> dol_bytes;
-        dol_build = xsflib::ReadFile(dol, dol_bytes) ? revosf2::ReadSndBuild(dol_bytes) : std::nullopt;
+        if (xsflib::ReadFile(dol, dol_bytes))
+        {
+            dol_build = revosf2::ReadSndBuild(dol_bytes);
+            dol_voices = revosf2::ReadAxVoices(dol_bytes);
+        }
         if (!dol_build)
         {
             std::fprintf(stderr, "%s shows no build of NW4R SND\n", dol);
@@ -460,8 +579,10 @@ void TestArchiveConvertsEverySequence(const char* path, const char* dol)
         const ntdlib::rsar::SoundArchive archive = ntdlib::rsar::SoundArchive::Load(std::move(bytes));
         const revosf2::SndBuild build =
             dol_build.value_or(ntdlib::sequence_export::BuildOfRsarVersion(archive.Version()));
-        failures += ntdlib::testing::CheckArchive(archive, RevolutionSettings(build), "revosf2");
-        CheckPieces(archive, RevolutionSettings(build));
+        Settings settings = RevolutionSettings(build);
+        settings.voices = dol_voices.value_or(settings.voices);
+        failures += ntdlib::testing::CheckArchive(archive, settings, "revosf2");
+        CheckPieces(archive, settings);
     }
     catch (const std::exception& e)
     {
@@ -504,7 +625,11 @@ int main(int argc, char** argv)
     TestMainDolIsFoundBesideTheFiles();
     TestCityFolkSetsUpItsMusic();
     TestCityFolkPlaysTheOtherArrangements();
+    TestWiiPlayMutesTracks();
+    TestChannelsSetUpTheirSounds();
+    TestWiiSportsSetsTheWind();
     TestCityFolkStepsItsGyroids();
+    TestMarioKartSetsItsEffectsVariable();
     TestWeathersHaveNames();
     TestPiecesAreFoundByTheirLabels();
     TestNovember2008LowPassSteps();

@@ -26,9 +26,20 @@ std::optional<SndBuild> ReadSndBuild(std::span<const uint8_t> dol)
     }
 
     SndBuild build = ntdlib::FindSndBuild(dol, {.check_day = true});
-    build.october_2006 = ntdlib::IdentifyBuild(*microcode) == ntdlib::AxBuild::kOctober2006;
+    build.october_2006 = build.date == 0 || ntdlib::IdentifyBuild(*microcode) == ntdlib::AxBuild::kOctober2006;
 
     return build;
+}
+
+std::optional<int> ReadAxVoices(std::span<const uint8_t> dol)
+{
+    const std::optional<ntdlib::Microcode> microcode = ntdlib::FindMicrocode(dol, {.skip_damaged_sections = true});
+    if (!microcode)
+    {
+        return std::nullopt;
+    }
+
+    return ntdlib::IdentifyBuild(*microcode) == ntdlib::AxBuild::kOctober2006 ? 64 : 96;
 }
 
 std::optional<fs::path> FindMainDol(const fs::path& archive)

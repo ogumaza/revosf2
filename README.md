@@ -24,10 +24,10 @@ revosf2 [options] <archive.brsar> [<archive.brsar> ...]
   --dol FILE     the game's main.dol, for the build of the game's sound library
                  (default: the game's main.dol when the input is a game, or
                  sys/main.dol of the extracted disc that holds the archive)
-  --weather W    the weather of Animal Crossing: City Folk's hourly and town
-                 music: fine, rain or snow (default fine)
-  --museum N     the arrangement of City Folk's museum music, from 1 to 7
-                 (default 1)
+  --weather W    convert Animal Crossing: City Folk's hourly and town music in
+                 one weather: fine, rain or snow (default: all three)
+  --museum N     convert City Folk's museum music in one arrangement, from 1
+                 to 7 (default: 1 to 6)
   --list         list sequences without converting
   --quiet        print errors only
   --version      show the version
@@ -47,14 +47,94 @@ its version. revosf2 notes that for an archive older than version 1.4.
 Animal Crossing: City Folk sets up its music as each piece starts. Given the game's `main.dol`
 (the USA release), revosf2 does the same. Each hourly piece and each piece of town music plays
 the tracks that the game plays in fine weather. The game silences the piece's other tracks. Rain
-and snow play other sets of tracks. `--weather rain` and `--weather snow` play those sets. In
-the MIDI files, a silenced track keeps its notes at CC11 0. The museum's music has seven
-arrangements. The game picks one by room and starts the music in the first. So does revosf2.
-`--museum 2` to `--museum 7` play the others. Arrangements 2 and 3 play the same tracks. CC91
-holds the sends that the game's code gives the music. The gyroids' sounds play in step with the
-music. The game counts the music's steps. A gyroid's sound plays a step each time the count
-changes. revosf2 plays one step of each: the count changes one frame after the sound starts.
-revosf2 notes when it plays an archive this way.
+and snow play other sets of tracks. revosf2 converts each piece once more in each. The files are
+named `BGM_OUTDOOR_00_rain`, `BGM_OUTDOOR_00_snow` and so on. In the MIDI files, a silenced
+track keeps its notes at CC11 0. The museum's music has seven arrangements. The game picks one
+by room and starts the music in the first. So does revosf2. It converts the museum's music once
+more in arrangements 2 to 6: `BGM_MUSEUM_arrangements_2_and_3`, `_arrangement_4`,
+`_arrangement_5` and `_arrangement_6`. Arrangements 2 and 3 play the same tracks. No room plays
+arrangement 7. `--weather rain` and `--weather snow` convert the music in one weather instead.
+`--museum 2` to `--museum 7` convert the museum's music in one arrangement. Either option leaves
+out the other files. CC91 holds the sends that the game's code gives the music. The gyroids'
+sounds play in step with the music. The game counts the music's steps. A gyroid's sound plays a
+step each time the count changes. revosf2 plays one step of each: the count changes one frame
+after the sound starts. revosf2 notes when it plays an archive this way.
+
+Wii Play's minigames mute tracks of their music while it plays. Given the game's `main.dol` (the USA
+release, Rev 1, or the European release), revosf2 does the same. Pose Mii's music for play plays
+only its first track. The game never lets the other tracks play. In the MIDI files, a muted track
+keeps its notes at CC11 0. Table Tennis, Laser Hockey, Billiards, Find Mii and Tanks add or swap
+tracks of their music as a game goes on. revosf2 plays each of those pieces with the tracks that
+sound as the minigame starts it. It converts the piece once more for each later set of tracks. A
+variant's files add its state to the piece's name: `_rally` for Table Tennis's rallies, `_last_30_s`
+and `_match_point` for Laser Hockey, `_state_3` and `_state_4` for Billiards, the seconds left for
+Find Mii (`_17_or_18_s_left` to `_last_6_s`), and `_arrangement_2` to `_arrangement_22` for Tanks,
+in the order of the game's table. Table Tennis plays the rally's tracks for a few bars at a time. In
+a match, once a player has 11 points, they stay. Billiards plays its states 2 and 3 at half the
+sound's volume (-6 dB). The conversions play at full volume. revosf2 notes when it plays an archive
+by Wii Play's code.
+
+Wii Music's main menu plays its music with some of its tracks. The menu's state picks them. Given
+the game's `main.dol` (the USA or the European release), revosf2 plays
+`RP_MUSIC_MAINMENU_BACKTRACK` with the tracks of the state that the menu starts in. It converts the
+piece once more in each of three other states, as `RP_MUSIC_MAINMENU_BACKTRACK_state_1`, `_state_3`
+and `_states_5_to_7`. The game names none of the states. Its other states play the tracks of one of
+these four. In the MIDI files, a silenced track keeps its notes at CC11 0. On the menu's carousel,
+the game plays tracks 1 to 6 at a lower level than the others: 2.6 or 5.8 dB lower, by the stop
+that faces the front. The files play them at full level.
+
+Wii Music's Pitch Perfect plays its beats, `RP_KKM_BEATS_LOOP`, with tracks 0, 1 and 3 at its
+lowest levels. Higher levels add tracks 4, 5 and 6. Track 2 joins once the round's time reads 10
+seconds or less. revosf2 plays the lowest levels' tracks in the beats' files. It converts the beats
+once more for each other set of tracks: `RP_KKM_BEATS_LOOP_levels_2_and_3`, `_levels_4_to_6` and
+`_levels_7_to_9`, and the same four sets with track 2, as `RP_KKM_BEATS_LOOP_with_track_2`,
+`_levels_2_and_3_with_track_2` and so on. In two of its modes, the game plays
+`RP_KKM_BEATS_LOOP_MAKE_SCORE` instead. That piece has no tracks 5 and 6. It converts once more as
+`_levels_2_to_9`, `_with_track_2` and `_levels_2_to_9_with_track_2`. Pitch Perfect also sends
+its phrases and the jingles of its pictures (`RP_KKM_SE_PHRASE_1_*` and `RP_KKM_SE_IMG_*`) to the
+reverb. revosf2 adds that send to their CC91. revosf2 notes when it plays an archive by Wii Music's
+code.
+
+The Mii Channel silences two tracks of its music, `SEQ_TMP_BGM`, as it starts it. Its scenes let
+other tracks play. Given the channel's title (World, version 6), revosf2 plays the music with the
+tracks that sound as the channel starts it. It converts the music once more in each of three other
+sets of tracks: `SEQ_TMP_BGM_scene_4`, `_menu_out` and `_scenes_1_and_3`. In the MIDI files, a
+silenced track keeps its notes at CC11 0. In the plaza, the channel plays the music about 9 %
+faster. The files don't. The channel's other sounds send to its reverb. revosf2 adds that send to
+their CC91.
+
+The Mii Channel and the Wii Shop Channel (World, version 20) put no effect on the Wii's second
+effect bus. Their sequences send to it all the same. The Wii mixes a bus into its output only when
+an effect is on it. revosf2 therefore gives CC93, the chorus send, 0 in both channels. revosf2
+notes when it plays an archive by either channel's code.
+
+Wii Sports' golf plays its wind, `SE_LV_Wind`, only while the hole has wind. The game writes the
+wind's speed and direction to the sequence's variables 0 and 1. Without them, the sequence plays
+nothing. Given the game's main.dol (USA, Rev 1), revosf2 plays the wind at a speed of 8 and in
+direction 0. `--var 0=N` gives another speed, from 1 to 15, and `--var 1=N` another direction,
+from 0 to 7. revosf2 notes when it plays golf's archive by the game's code.
+
+Mario Kart Wii's menus play their music with some of its tracks. The page on screen, or the
+section of the menus, picks them. Given the game's `main.dol` (the USA or the European release),
+revosf2 plays `SEQ_O_SELECT`, the music of the menus, with its first track alone, as the main menu
+does. It plays `SEQ_O_EARTH`, the music of the Wi-Fi menus, with the four tracks that the first of
+those menus plays. It converts each piece once more in each other state of the menus:
+`SEQ_O_SELECT_state_1` and `_state_2`, and `SEQ_O_EARTH_state_1` to `_state_3`. The game names
+none of the states. In the MIDI files, a silenced track keeps its notes at CC11 0. In states 1 and
+2, the game plays the first track of `SEQ_O_SELECT` at 0.93 of its volume (0.63 dB lower). The
+files play it at full level. Seven of the game's sound effects read their variable 0. The game
+sets it each time it plays one. Six of them start with the value of their first play in the
+game, from the start of a Grand Prix's first race with controller 1: the ring sounds of Rainbow
+Road, the rank sounds and two menu sounds. `SE_RC_RANK_UP` gets 1, the others 0. The gate sound
+`SE_CC_MSR_GATE_PASS` keeps -1. The course's file gives its value. `--var 0=N` gives another
+value. revosf2 notes when it plays an archive by Mario Kart Wii's code.
+
+WarioWare: Smooth Moves (USA) puts a reverb on effect bus A, or none, as each stage starts. The
+microgames' music plays through the reverb of its stage. Given the game's `main.dol`, revosf2
+plays each microgame's music as the stage that plays it first does. The music of Young
+Cricket's, Penny's, 9-Volt's, Tiny Wario's and Dr. Crygor's stages gets CC91 0 throughout. The
+other stages keep the music's sends in CC91. A microgame that a later stage plays again keeps
+the reverb of its first stage. revosf2 notes when it plays the archive this way.
 
 Mega Man 9 (WiiWare) plays each piece of its music as four sequences, one for each channel of
 the NES's sound chip. The game starts the four together. Their names are the piece's name
@@ -110,16 +190,18 @@ macOS takes only `.brsar` and `.baa` files.
 ## JAudio games
 
 Some Wii games have no sound archive. They play their sound through JAudio2, the sound library
-in Nintendo EAD's JSystem. Twilight Princess and Link's Crossbow Training are two of them.
-revosf2 converts their music and sound effects. Give it the game, or the game's start-up archive
-(`.baa`) with the game's other sound files beside it. The game's files hold three kinds of sound
-file:
+in Nintendo EAD's JSystem. Twilight Princess, Link's Crossbow Training, New Play Control!
+Donkey Kong Jungle Beat, Super Mario Galaxy and Super Mario Galaxy 2 are among them. revosf2
+converts their music and sound effects. Give it the game, or the game's start-up archive with
+the game's other sound files beside it. The game's files hold three kinds of sound file:
 
 - **The start-up archive** (`.baa`) contains the sound table and the sounds' names, the
-  instrument banks and the wave systems.
+  instrument banks and the wave systems. Jungle Beat and the Galaxy games compress their
+  start-up archives with Yaz0, in a `.szs` file.
 - **The sequence archive** (an RARC archive in a `Seqs` folder beside the start-up archive)
-  contains the sequences.
+  contains the sequences. The Galaxy games also compress the sequences inside it with Yaz0.
 - **The wave archives** (`.aw` files in a `Waves` folder beside it) contain the samples.
+  Jungle Beat keeps them in a `Banks` folder.
 
 Given the game, revosf2 puts the files in a folder named after the start-up archive, inside
 `<game name>_revosf2`. Given the start-up archive, it puts them in `<archive name>_revosf2`
@@ -130,12 +212,158 @@ Files take the names that the table gives the sounds. A sound without a name bec
 `SOUND_<section>_<group>_<index>`. Files of the sequence archive that no sound plays come last.
 They keep the names of their files. `--loops`, `--seed` and `--only` work as for a sound
 archive. The game's random state starts at 0 unless `--seed` gives another. The game steers some
-sequences through ports. revosf2 starts each port at 0, as the game does. JAudio2's sequences
-have no variables, and NW4R SND's builds don't apply to them. `--var` and `--dol` change nothing
-in them.
+sequences through ports. revosf2 starts each port at 0, as the game does, apart from the ports
+of the effects below. JAudio2's sequences have no variables, and NW4R SND's builds don't apply
+to them. `--var` and `--dol` change nothing in them.
+
+Some rules for a game's sound lie in the game's code, not in its files. revosf2 recognizes the
+start-up archive of New Play Control! Donkey Kong Jungle Beat, from the USA release. The game's
+code mutes some tracks of its music, and it gives some effects a value as it starts them:
+
+- **Muted tracks.** The game starts 45 pieces with some of their tracks turned off. It turns
+  some of them on later, as play goes on. revosf2 leaves out the notes of the tracks that are
+  off when the piece starts. One piece, JA_BGM_OP_CEMEMONY, starts with every such track off.
+  The game turns them on as the piece goes on. revosf2 plays that piece with the tracks of its
+  next state.
+- **The beat.** In 62 pieces, one track gives the game the music's beat. The game mutes that
+  track. revosf2 leaves its notes out.
+- **The chord effects.** The game plays dozens of effects of its instruments in the chords of
+  the music. The game's code works out their notes' keys from the music as it plays. revosf2
+  doesn't follow that code. Most of those effects come out with no notes.
+- **Effects that take a value.** Some effects add a value that the game's code gives them to
+  the key of their notes. The game's state decides the value, such as the count of a combo.
+  revosf2 plays six effects with the first value that the game gives them. Without it,
+  JA_SE_PAUSE_MENU_CLAP_PARAM plays no note.
+
+revosf2 also recognizes the start-up archives of Super Mario Galaxy and Super Mario Galaxy 2,
+from the USA releases. Their code changes their sound in these ways:
+
+- **Muted tracks.** The game starts 18 of Galaxy's pieces and 41 of Galaxy 2's with some
+  tracks turned off. It turns some of them on later in play. revosf2 leaves out the notes of
+  the tracks that are off when the piece starts.
+- **The beat.** In 73 of Galaxy's 105 pieces and 83 of Galaxy 2's 127, one track gives the
+  game the music's beat. The game mutes that track. revosf2 leaves its notes out. Some pieces
+  play nothing else. The game plays them over a stream for their beat. Their files hold no
+  notes.
+- **Volumes.** The game plays its music at 1.2 times the volume in the sound table. It gives
+  each of the effects' 16 categories a volume from 1.0 to 1.5. Galaxy 2 also gives each piece
+  a volume in `AudioRes/Info/BgmParam.arc`. revosf2 applies all three.
+- **The multi BGMs.** The sound table's MBGM_ sounds play a piece of music with a stream. For
+  each of them, the game's code starts a BGM_ piece in their place. Their entries in the
+  table all point at one stand-in sequence. revosf2 leaves the MBGM_ sounds out.
+- **Effects that take values from play.** The game's code writes values for some effects
+  from the state of play. The effects of the music notes take their keys from the music that
+  plays. When Luigi is the player, the player's voice effects play Luigi's waves in place of
+  Mario's. Some effects take the code of the map, or values of the scene. revosf2 plays these
+  effects with those values at 0. The voice effects then play Mario's voice.
+- **The echo.** The game sets up an echo at start-up. 50 of Galaxy's effects and 268 of
+  Galaxy 2's send to it. A SoundFont can't hold an echo. The files hold the send as CC91, the
+  send to the player's reverb. A file that sends to the echo lasts until the game's echo
+  falls silent.
+
+New Play Control! Pikmin and New Play Control! Pikmin 2 play their sound through the first
+JAudio, the version before JAudio2. revosf2 converts their music and sound effects. Pikmin 2
+keeps a start-up archive (`.aaf`) in its `AudioRes` folder. Pikmin has none. A bank file
+(`pikibank.bx`) in `SndData/Banks` contains its instrument banks and wave systems. One file in
+`SndData/Seqs` holds every sequence. The index that divides that file is in the game's code
+(`main.dol`). For Pikmin, give revosf2 the game. revosf2 recognizes the USA releases: Pikmin by
+its bank file and `main.dol`, and Pikmin 2 by its start-up archive. Another release converts
+without its effects and without the rules below.
+
+The game's code holds Pikmin's catalogue of effects. The sound library starts two sequences at
+start-up. To start an effect of the system or of the player, the game writes the effect's
+number to a port of a track of the first. That track then opens a track below it that plays
+the effect. The effects of the game's events go to tracks of the second sequence. revosf2
+plays each effect that way and names it after the catalogue. The game's code also plays six
+effects that the catalogue doesn't list. Five belong to the system and the player. revosf2
+names them `system-<n>` and `player-<n>`, with the effect's number in hexadecimal. The sixth is
+the sound of the formation. The game plays it while the player moves the formation. revosf2
+plays it for a full move straight ahead and names it `formation`. The game's code also sets
+Pikmin's music:
+
+- **Banks.** The game plays each piece with the bank whose number is the piece's number in the
+  index. revosf2 does the same.
+- **The cutscenes' music.** One sequence holds the music of the cutscenes, in parts. A cutscene
+  picks its part with a port of the sequence's first track. The game plays eight of the parts.
+  revosf2 converts each of them to a separate file, named after the sequence with a hyphen
+  and the part's number.
+- **The tracks' volumes.** The game sets a volume for each track of a piece, other than the
+  cutscenes' music. Most pieces play at half their volume, one at 0.55 and one at 0.35. Five
+  pieces start with some of their tracks off. The game turns some of them on as play goes on.
+  revosf2 leaves out the notes of the tracks that are off when the piece starts.
+- **Volumes as they are.** Pikmin's sound library plays a track's volume as it is. The later
+  form of the first JAudio squares it. CC7 therefore holds the square root of the volume.
+  revosf2 does the same.
+- **The level of the mix.** The game's code sets the level of its whole mix at start-up. The
+  level comes to 0.599 of the level that revosf2 gives the other games of the first JAudio,
+  about 4.5 dB below it. revosf2 plays all of the game's notes at that level.
+
+Pikmin's effects play louder against its music than in the game.
+
+Pikmin 2 plays each piece of music through an object of the game's sound layer. The object
+answers the piece's calls to the game. revosf2 follows these rules of the game:
+
+- **The calls.** A piece's first track asks the game for the time between its beats, and a
+  boss's music asks for its start. The game answers with 60 ticks, or 30 in two pieces. A middle
+  boss starts m_boss at part 9, and the final boss starts l_boss at part 1. revosf2 gives the
+  same answers.
+- **The directors' tracks.** Some tracks of a piece follow the game's action, such as an enemy
+  nearby or a treasure carried. The game mutes them as they start. revosf2 leaves out their
+  notes, so each piece plays as it does with nothing going on.
+- **The cave music.** A cave's piece has a conductor. The conductor picks the phrases and rests
+  that each track plays, at random, and sets the track's instrument, volume and pan. revosf2
+  plays each piece with the first conductor of its family, such as caveconc_00_0. It draws the
+  random numbers as the game does from the start. Such a piece plays until each track reaches
+  its last part. The file has no loop: the game picks the phrases at random from then on. The
+  game's echo leaves quiet tails between the notes. MIDI and SoundFont can't describe an echo,
+  so the files don't hold them.
+- **The volumes.** The game plays each piece at a volume from a list in its files. revosf2 does
+  the same.
+
+As JAudio2's does below, Pikmin 2's music plays about 0.08% slower on the Wii than in the files.
+
+Many of Pikmin 2's effects play quieter than in the game. Pikmin plays some effects from waves
+in 2-bit ADPCM. revosf2 decodes them.
 
 JAudio2 times its music for the GameCube's rate of about 32,028 Hz. The Wii plays it at
 32,000 Hz. There the music plays 0.089% slower and 1.5 cents lower than in the files.
+
+Twilight Princess gives its categories of sound effects their volumes at start-up. Category 1,
+Link's voice, keeps the volume of the sound table. The others play at 120/127 of it. revosf2
+does the same. During a conversation and in the pause menu, the game plays most categories
+quieter for a while. revosf2 leaves that out.
+
+As Twilight Princess starts five pieces of music, it mutes some of their tracks. Hyrule Field's
+day music holds two arrangements. One plays while Link walks, and the other while he rides.
+revosf2 converts the piece twice and leaves out the muted tracks' notes. `Z2BGM_FIELD_LINK_DAY`
+holds the walking arrangement and `Z2BGM_FIELD_LINK_DAY_riding` the riding one.
+`Z2BGM_TOAL_VILLEGE`, `Z2BGM_HORSE_BATTLE`, `Z2BGM_BOSS_SNOWWOMAN_1` and `Z2BGM_VS_GANON_02`
+leave out the tracks that the game mutes as they start. Later, the game's scenes, fights and
+other code change the tracks of 17 pieces. Some states play a track at part of its volume, such
+as Ordon Village's tracks at 0.65. The piece's file plays the state that the game starts the
+piece in, such as the state of a dungeon's first room. revosf2 converts each later state as one
+more file of the piece. Its name adds the status that the game gives the piece, such as
+`Z2BGM_TOAL_VILLEGE_status1`. The battle music's states follow the fight: `_near`, `_searched`,
+`_near_searched` and `_port9_1`. Hyrule Field's day music also follows the field's code: what
+Link does, the enemies near him and the time of day. revosf2 converts each way through the piece
+as one more file in each arrangement. `_status12` plays the sections of a long walk or ride.
+`_status4` to `_status7` play a fight's sections by their four entries. `_status10` and
+`_status11` play the two endings of a day. `_status8` and `_status9` play the starts that the
+field's code makes once no music plays. `_riding_status3` plays the section of Link standing on
+his horse. The game moves the tracks to a new state gradually. revosf2 plays each state from the
+start and leaves out the states in between.
+
+Link's Crossbow Training runs a later build of Twilight Princess's sound code. The game plays
+the sounds of the surroundings (category 9) at 100/127 of the sound table's volume. The other
+categories play as in Twilight Princess. As the same five pieces start, the game mutes the same
+tracks. revosf2 does the same. Some of the game's sound effects read values that the game
+passes to them as they play, such as information about the map. revosf2 plays them with the
+value 0. The game passes 0 when it has no other value.
+
+Both games set up an echo at start-up. A sound that sends to it repeats about every 160 ms. Each
+repeat has half the level of the one before. MIDI and SoundFont can't describe an echo. The MIDI
+file of a sequence that sends to it ends when the echo falls silent. Looping and held sounds keep
+their ends.
 
 Programs 0xf0 and up play the DSP's built-in oscillators. The square wave, the sawtooth, the
 pulse of 25% duty, the triangle and the sine become looping samples of one cycle, one for each
@@ -143,12 +371,19 @@ program. Each preset of such a program has one zone, for every key and velocity.
 the oscillators' envelope: full volume until the release, then a fall to silence over about
 17 ms. The DSP changes its noise and its ramp as it plays. No sample can hold them.
 
+A track can pass its notes through an IIR filter. In music, each region of a filtered track
+becomes two zones. One zone plays the region unfiltered. The other plays it through a low-pass.
+Their levels are fitted so that together they follow the filter's curve. The two zones double
+the voices of the filtered tracks. A track whose filter changes from note to note stays
+unfiltered. So does a filter that changes no band by 0.3 dB or more, and every sound effect's
+filter. revosf2 reports the filters that it leaves out.
+
 MIDI and SoundFont can't hold everything that JAudio2 does. The fitted envelopes can't follow an
 oscillator's table that rises again or loops. Random instrument effects play at their base
-values. Tremolos, track filters, pitch envelopes and notes on the DSP's noise, ramp and other
-oscillators that no sample can hold are left out. A vibrato deeper than a semitone is kept to a
-semitone. revosf2 reports each of these for each sequence. The game plays a limited number of
-notes at once. revosf2 keeps every note.
+values. Tremolos, pitch envelopes and notes on the DSP's noise, ramp and other oscillators that
+no sample can hold are left out. A vibrato deeper than a semitone is kept to a semitone. revosf2
+reports each of these for each sequence. The game plays a limited number of notes at once.
+revosf2 keeps every note.
 
 ## Downloads
 
@@ -216,9 +451,10 @@ controllers. The performer models NW4R SND's sequence player, including:
   the loop end's value.
 
 NW4R SND changed how it plays sequences after its builds of 2006, and again in 2008 and 2009.
-The game's `main.dol` shows which build it links. AX's microcode marks the builds of 2006: their
-AX moves 0x120-byte parameter blocks, and every later one moves 0x140 bytes. The sound library's
-banner dates the later builds. revosf2 plays an archive as that build does. Without a
+The game's `main.dol` shows which build it links. The sound library's banner dates the builds
+from 2007 on. A build without a banner plays as the builds of 2006. Some of those come with a
+later AX. AX of 2006 moves 0x120-byte parameter blocks, and every later AX moves 0x140 bytes.
+revosf2 plays an archive as that build does. Without a
 `main.dol`, an archive of version 1.4 or later plays as the builds from June 2008, and an older
 archive as the builds of 2007. The archives of the builds of 2006 and 2007 have the same
 versions. Some games from 2008 also keep an archive of an older version, such as the archive of
@@ -234,7 +470,8 @@ pitch bend to its value over the prefix's ticks. They also let a note's volume a
 above full level (see "Volume limits" below). The builds of 2006 count ticks in 416ths, and have
 no timebase. A tick there is 0.16% shorter than at the usual 48 ticks a quarter note. They play
 stereo waves in dual mode. At the centre, that's 3 dB louder than balance mode. They also raise
-a pan of 1 to 2, stop a released note once its volume falls to 0, and have 64 voices.
+a pan of 1 to 2 and stop a released note once its volume falls to 0. With AX of 2006, they have
+64 voices.
 
 Short loops, such as repeating sound effects, run until the MIDI is at least 10 seconds long.
 Indefinitely held sounds are capped at 10 seconds after their last change. A note of 9,600 ticks
@@ -373,7 +610,7 @@ Regions match the SoundFont, with these differences:
 - **Loops.** sfizz crossfades the loop end with data before the loop start over at least 1 ms.
   Samples include 4 ms of repeated loop data before the start. The crossfade is then inaudible.
 
-Four sfizz 1.2.3 quirks affect playback:
+Five sfizz 1.2.3 quirks affect playback:
 
 - **Decays and releases.** sfizz ends them sooner than the documentation's curve. Over the
   specified time, sfizz falls by a factor of e^-9: 78.17 dB. Where the game has fallen 40 dB,
@@ -388,6 +625,8 @@ Four sfizz 1.2.3 quirks affect playback:
   3 dB. Every sample of the files is mono. Every region therefore plays 3.0 dB above the game's
   level, at every pan. The balance of the mix stays the same. Lowering sfizz's volume by 3 dB
   gives the game's level.
+- **Short decays and releases.** sfizz makes each decay and release last at least 6 ms. The
+  documentation sets no such floor. A shorter time plays over 6 ms.
 
 The opcodes follow their documentation at sfzformat.com, with these exceptions:
 
@@ -489,7 +728,7 @@ in MIDI, SoundFont or SFZ:
   track filter's fitted cutoff takes the lower of the two at its original key. AX also runs a
   compressor on the final mix. While the mix would pass full scale, the compressor turns the
   whole mix down. A synth plays such a passage louder, or clips it.
-- **Voice limits.** AX has 96 voices, or 64 in the builds of 2006; synths usually have more.
+- **Voice limits.** AX has 96 voices, or 64 in AX of 2006. Synths usually have more.
   With all of them in use, the game gives a new note the voice of the lowest priority. AX also
   stops the voices of the lowest priority when a frame would take more DSP time than AX allows.
   revosf2 plays every note to its end. If a track starts more than 1,024 notes in one tick,
@@ -579,9 +818,10 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 
 `ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
 `main.dol` beside an archive, the low-pass of the builds from November 2008, the set-up of
-Animal Crossing: City Folk's music and gyroids and the search for Mega Man 9's pieces by their
-sequences' names. It checks which inputs are games, the messages for disc images that revosf2
-can't read, and the output folders of games. It checks that the program reports its version, and
+Animal Crossing: City Folk's music and gyroids, the tracks of Wii Play's music, the reverb of
+WarioWare: Smooth Moves' microgames and the search for Mega Man 9's pieces by their sequences'
+names. It checks which inputs are games, the messages for disc images that revosf2 can't read,
+and the output folders of games. It checks that the program reports its version, and
 rejects a variable that the game doesn't have and a `--dol` file without AX's microcode. It also
 rejects a weather and a museum arrangement that City Folk doesn't have. It converts a small
 JAudio2 game that the test program writes, from its start-up archive and from an extracted disc.
