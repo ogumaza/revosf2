@@ -360,8 +360,8 @@ struct PieceMask
 //   49 frames, mutes track 10 and lets tracks 4 to 6 play again: the start's tracks. Track 12 counts the bars in the
 //   sequence's variable 0 (0x80235394). It plays no note, and the profile leaves it out. Once the match's higher score
 //   reaches 11 (0x8022cdb4), the game no longer fades (0x802353e4), and the rally's arrangement stays. The conversion
-//   plays the start's tracks. The variants _rally play the rally's arrangement. The game also sets the tempo of a rally
-//   (the known problems' "Wii Play's tempos").
+//   plays the start's tracks. The variants _rally play the rally's arrangement. During one player's rally, 0x80235540
+//   also sets a tempo ratio of 0.96 to 1.14 by the rally's level. The conversions play a ratio of 1.
 // - Laser Hockey starts RP_HKY_BGM_ALL_PLAY (sound 0x44) without tracks 0, 12, 13 and 14 (0x80220b04). Each frame,
 //   0x8022074c lets tracks 0, 12 and 14 play once 30 s or less of the match are left. A match can also end at 8 goals
 //   (0x8021a83c). In such a match, a player's seventh goal puts the music in state 3 (0x80216f1c). 0x8022074c then

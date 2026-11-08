@@ -251,11 +251,15 @@ from the USA releases. Their code changes their sound in these ways:
 - **The multi BGMs.** The sound table's MBGM_ sounds play a piece of music with a stream. For
   each of them, the game's code starts a BGM_ piece in their place. Their entries in the
   table all point at one stand-in sequence. revosf2 leaves the MBGM_ sounds out.
+- **Luigi's voice.** When Luigi is the player, the game starts each of the player's voice
+  effects (`SE_PV_`) with a value at a port that picks Luigi's waves in place of Mario's.
+  revosf2 converts each voice that reads the port a second time, as Luigi's voice, with
+  `_Luigi` at the end of its name: 75 of Galaxy's 87 voices and 120 of Galaxy 2's 133. Three of
+  Galaxy 2's voices play nothing for Luigi, and their files hold no notes.
 - **Effects that take values from play.** The game's code writes values for some effects
   from the state of play. The effects of the music notes take their keys from the music that
-  plays. When Luigi is the player, the player's voice effects play Luigi's waves in place of
-  Mario's. Some effects take the code of the map, or values of the scene. revosf2 plays these
-  effects with those values at 0. The voice effects then play Mario's voice.
+  plays. Some effects take the code of the map, or values of the scene. revosf2 plays these
+  effects with those values at 0.
 - **The echo.** The game sets up an echo at start-up. 50 of Galaxy's effects and 268 of
   Galaxy 2's send to it. A SoundFont can't hold an echo. The files hold the send as CC91, the
   send to the player's reverb. A file that sends to the echo lasts until the game's echo
