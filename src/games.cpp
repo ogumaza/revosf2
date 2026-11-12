@@ -20,6 +20,8 @@
 #include "xsflib/ascii.h"
 #include "xsflib/files.h"
 
+#include "program.h"
+
 namespace revosf2
 {
 
@@ -65,11 +67,11 @@ bool HoldsGame(const fs::path& folder)
 
 ntdlib::disc::GameOptions DiscOptions()
 {
-    ntdlib::disc::GameOptions options{ntdlib::disc::Console::kWii, "revosf2"};
+    ntdlib::disc::GameOptions options{ntdlib::disc::Console::kWii, kProgram};
     options.image.refuse_container = [](const std::string& format)
     {
-        return "it's " + std::string(format == "RVZ" ? "an " : "a ") + format +
-               " disc image. revosf2 can't read those. " + std::string(kExtract);
+        return "it's " + std::string(format == "RVZ" ? "an " : "a ") + format + " disc image. " + kProgram +
+               " can't read those. " + std::string(kExtract);
     };
 
     options.titles = true;
@@ -108,8 +110,8 @@ std::string GameMessage(const std::string& error)
         return error;
     }
 
-    return std::string(kEncrypted) + " revosf2 reads only decrypted partitions. NKit images store them that way. " +
-           std::string(kExtract);
+    return std::string(kEncrypted) + " " + kProgram +
+           " reads only decrypted partitions. NKit images store them that way. " + std::string(kExtract);
 }
 
 fs::path GamePath(const fs::path& input)
@@ -131,7 +133,7 @@ fs::path GameOutputFolder(const fs::path& path)
     std::error_code error;
     const fs::path name = fs::is_directory(path, error) ? path.filename() : path.stem();
 
-    return path.parent_path() / xsflib::PathFromUtf8(seqlib::SafeFileName(xsflib::Utf8(name) + "_revosf2"));
+    return path.parent_path() / xsflib::PathFromUtf8(seqlib::SafeFileName(xsflib::Utf8(name) + "_" + kProgram));
 }
 
 } // namespace revosf2

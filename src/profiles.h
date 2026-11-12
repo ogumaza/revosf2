@@ -12,7 +12,9 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "ntdlib/sequence_export/performance.h"
 
@@ -64,13 +66,13 @@ Profile ProfileOf(std::span<const uint8_t> dol);
 struct Variant
 {
     std::string_view sound;
-    std::string_view suffix;
+    std::string suffix;
     uint16_t tracks;
 };
 
 // The variants that `profile` converts, in the order that the conversions list them. City Folk's profile converts its
 // variants only in the arrangements that the game starts in. `chosen` is set when --weather or --museum gives others.
-std::span<const Variant> VariantsOf(Profile profile, bool chosen);
+std::vector<Variant> VariantsOf(Profile profile, bool chosen);
 
 // Sets up the performance of the sound named `sound` as the game of `profile` starts it, in `arrangements`: the tracks
 // that sound, the sound's sends, and the changes of variables that the game's code makes while the sound plays. A sound

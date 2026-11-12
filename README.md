@@ -8,7 +8,7 @@ play their sound through JAudio2 (see [JAudio games](#jaudio-games)).
 
 Drop archives onto `revosf2.exe` on Windows or `Revosf2.app` on macOS. Output goes in a folder
 beside each archive. An input can also be a whole game: a disc image, an extracted disc or a
-WiiWare title (see [Games](#games)). It can also be a JAudio2 game's start-up archive (`.baa`).
+WiiWare title (see [Games](#games)). It can also be a JAudio game's start-up archive (`.baa` or `.aaf`).
 From a terminal:
 
 ```
@@ -18,7 +18,8 @@ revosf2 [options] <archive.brsar> [<archive.brsar> ...]
   --only REGEX   convert matching sequence names (for example --only BGM)
   --loops N      repeat the main loop N times (default 1)
                  MIDI loop markers are included for players that support them
-  --seed N       initial game random state (default 0x12345678)
+  --seed N       initial game random state (default 0x12345678, or 0 for
+                 a JAudio game)
   --var N=V      set variable N (0-15 player, 16-31 global) to V before each
                  sequence starts; repeat for more variables
   --dol FILE     the game's main.dol, for the build of the game's sound library
@@ -185,7 +186,7 @@ revosf2 reads three kinds of game:
   Disc. Then convert the folder that Dolphin extracted it to.
 
 Give games on the command line, or drop them onto `revosf2.exe` on Windows. `Revosf2.app` on
-macOS takes only `.brsar` and `.baa` files.
+macOS takes only `.brsar`, `.baa` and `.aaf` files.
 
 ## JAudio games
 
@@ -225,6 +226,15 @@ code mutes some tracks of its music, and it gives some effects a value as it sta
   off when the piece starts. One piece, JA_BGM_OP_CEMEMONY, starts with every such track off.
   The game turns them on as the piece goes on. revosf2 plays that piece with the tracks of its
   next state.
+- **The music's states.** The game turns tracks on or off as play goes on: as a combo grows,
+  while a Helibird carries DK, in each part of a boss fight, and while DK swims deep in
+  TropicalCoast. revosf2 converts 44 pieces once more in each such state, 102 files in all. A
+  file is named after the piece and what sets its state, for example `JA_BGM_MAIN_01_combo1` and
+  `_combo2` for the layers of a combo, `_helibird` for a flight with a Helibird, `_round2` and
+  `_change` for a boss's second round and the change before it, and `_underwater` for
+  TropicalCoast's music while DK swims below. As the menus do, `JA_BGM_COURSE_SELECT_state1`
+  plays the map's music with two tracks off. Each file plays its state from the piece's start.
+  The game fades from one state to the next, and the files leave out those changes.
 - **The beat.** In 62 pieces, one track gives the game the music's beat. The game mutes that
   track. revosf2 leaves its notes out.
 - **The chord effects.** The game plays dozens of effects of its instruments in the chords of
@@ -396,12 +406,12 @@ source (see [Building](#building)).
 
 ## Drag and drop
 
-- **Windows:** drop one or more `.brsar` or `.baa` files onto `revosf2.exe`, or games: their
+- **Windows:** drop one or more `.brsar`, `.baa` or `.aaf` files onto `revosf2.exe`, or games: their
   folders or disc images. The console shows the results and waits for Enter before closing.
 - **macOS:** drop archives onto `Revosf2.app`, or open it to choose files. The app shows the
   results and offers to open the output folders. It wraps the command-line program because
   Finder cannot drop files onto a bare executable. The app is included in the
-  [build](#building). It takes only `.brsar` and `.baa` files. Convert games from a terminal.
+  [build](#building). It takes only `.brsar`, `.baa` and `.aaf` files. Convert games from a terminal.
 
 An unreadable archive reports an error without stopping the others. If two inputs would use the
 same output folder, the second is skipped to protect the first's files. This can happen when
@@ -820,17 +830,17 @@ C++ formatting uses clang-format with the repository's `.clang-format`.
 
 ## Tests and tools
 
-`ctest` checks the build of the sound library that a game's `main.dol` shows, the search for
-`main.dol` beside an archive, the low-pass of the builds from November 2008, the set-up of
-Animal Crossing: City Folk's music and gyroids, the tracks of Wii Play's music, the reverb of
-WarioWare: Smooth Moves' microgames and the search for Mega Man 9's pieces by their sequences'
-names. It checks which inputs are games, the messages for disc images that revosf2 can't read,
-and the output folders of games. It checks that the program reports its version, and
-rejects a variable that the game doesn't have and a `--dol` file without AX's microcode. It also
-rejects a weather and a museum arrangement that City Folk doesn't have. It converts a small
-JAudio2 game that the test program writes, from its start-up archive and from an extracted disc.
-The conversion's unit tests are in the seqlib and ntdlib libraries. They run on synthetic files,
-without game data.
+`ctest` checks the build of the sound library that a game's `main.dol` shows and the archive
+settings that follow from it, the low-pass of the builds from November 2008, the set-up of
+Animal Crossing: City Folk's music and gyroids, the tracks of Wii Play's music, the set-up of
+the sounds of the Mii Channel, the Wii Shop Channel, Wii Sports and Mario Kart Wii, and the
+search for Mega Man 9's pieces by their sequences' names. It checks which inputs are games, the
+messages for disc images that revosf2 can't read, and the output folders of games. It checks
+that the program reports its version, and rejects a variable that the game doesn't have and a
+`--dol` file without AX's microcode. It also rejects a weather and a museum arrangement that
+City Folk doesn't have. It converts a small JAudio2 game that the test program writes, from its
+start-up archive and from an extracted disc. The conversion's unit tests are in the seqlib and
+ntdlib libraries. They run on synthetic files, without game data.
 
 Other checks and tools:
 

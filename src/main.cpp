@@ -6,33 +6,31 @@
 //
 // Output goes beside each archive. An input can also be a game: a Wii disc image, an extracted disc or a WiiWare
 // title's folder. Each of its sound archives converts into a folder of its own. Those folders go in a folder beside the
-// game. Music that a game plays as several sequences together converts as one piece (pieces.h). revosf2 also converts
-// the music and sound effects of Wii games that play their sound with JAudio: from the game, or from the game's
-// start-up archive (.baa or .aaf) with the game's other sound files beside it. ntdlib's converter of JAudio games
-// converts them. Windows accepts files dropped on the executable; macOS uses Revosf2.app.
+// game. Music that a game plays as several sequences together converts as one piece (ntdlib/sound_pieces.h). revosf2
+// also converts the music and sound effects of Wii games that play their sound with JAudio: from the game, or from the
+// game's start-up archive (.baa or .aaf) with the game's other sound files beside it. ntdlib's converter of JAudio
+// games converts them. Windows accepts files dropped on the executable; macOS uses Revosf2.app.
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <regex>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "ntdlib/disc/game.h"
+#include "ntdlib/dol.h"
 #include "ntdlib/rsar/formats.h"
 #include "ntdlib/sequence_export/archive_converter.h"
-#include "ntdlib/sequence_export/consoles.h"
+#include "ntdlib/sequence_export/arrangements.h"
 #include "ntdlib/sequence_export/convert.h"
 #include "ntdlib/sequence_export/frame.h"
 #include "ntdlib/sequence_export/jaudio/game.h"
@@ -40,25 +38,25 @@
 #include "ntdlib/sequence_export/jaudio/performance.h"
 #include "ntdlib/sequence_export/performance.h"
 #include "ntdlib/sequence_export/settings.h"
+#include "ntdlib/sound_pieces.h"
 #include "seqlib/file_name.h"
 #include "xsflib/rip/tool.h"
 
 #include "games.h"
-#include "pieces.h"
 #include "profiles.h"
+#include "program.h"
 #include "snd_build.h"
 
 namespace fs = std::filesystem;
 namespace frame = ntdlib::sequence_export;
 namespace jaudio = ntdlib::sequence_export::jaudio;
+using ntdlib::FindMainDol;
 using ntdlib::rsar::SoundArchive;
 using ntdlib::sequence_export::PerformOptions;
 using revosf2::Arrangements;
-using revosf2::FindMainDol;
+using revosf2::kProgram;
 using revosf2::Profile;
 using revosf2::ProfileOf;
-using revosf2::ReadAxVoices;
-using revosf2::ReadSndBuild;
 using revosf2::SndBuild;
 using revosf2::Weather;
 
@@ -76,31 +74,12 @@ struct JAudioInputs
     frame::Options<jaudio::PerformOptions> options;
 };
 
-// The games of the first JAudio whose sound effects revosf2 converts, by the SHA-1s of their start-up archives
-// (jaudio::GameOptions::jaudio1_effects). Pikmin has no start-up archive, and its bank file takes the archive's place.
-// Each of these games plays its effects in the effects sequence that ntdlib's rules for the game name. revosf2 leaves
-// out the effects of the other games of the first JAudio.
-constexpr std::array<std::string_view, 2> kEffectsGames{
-    "9f42f65be7f7159faa14b003524476d624e1227f", // New Play Control! Pikmin's bank file
-    "6747c3c7bce964bc62f817e1c8c32711c905c4c3", // New Play Control! Pikmin 2
-};
+// How revosf2 opens a JAudio game. The effects of the first JAudio convert for the games that ntdlib's rules list
+// (jaudio::GameRules::known_effects), such as New Play Control! Pikmin and Pikmin 2.
+constexpr jaudio::GameOptions kJAudioOptions{.known_effects = true};
 
-// Whether `game` is one of kEffectsGames.
-bool ListsEffects(const jaudio::Game& game)
-{
-    return std::ranges::find(kEffectsGames, game.ArchiveSha1()) != kEffectsGames.end();
-}
-
-// The JAudio game whose start-up archive is at `path`, with the game's other files beside it. A game of kEffectsGames
-// opens a second time, with its effects. Throws jaudio::FormatError if the archive can't be read.
-jaudio::Game OpenJAudioArchive(const fs::path& path)
-{
-    jaudio::Game game = jaudio::Game::FromFolder(path, "revosf2");
-    return ListsEffects(game) ? jaudio::Game::FromFolder(path, "revosf2", {.jaudio1_effects = true}) : std::move(game);
-}
-
-// The rules that `build` plays by.
-const char* RulesOf(const SndBuild& build)
+// The words for the builds whose rules `build` plays by, in the note on an archive's build.
+const char* BuildWords(const SndBuild& build)
 {
     return build.October2006()          ? "builds of 2006"
            : build.SinceSeptember2009() ? "builds from September 2009"
@@ -110,54 +89,50 @@ const char* RulesOf(const SndBuild& build)
                                         : "builds of 2007";
 }
 
-// What a game's main.dol shows about a sound archive: the build of NW4R SND that plays it, the number of voices of the
-// game's AX, and the game's profile.
+// What a game's main.dol shows about a sound archive: the sound library that plays it (snd_build.h) and the game's
+// profile.
 struct GameCode
 {
-    std::optional<SndBuild> build;
-    std::optional<int> voices;
+    std::optional<revosf2::SoundLibrary> library;
     Profile profile = Profile::kNone;
 };
 
-// What a game's main.dol, `bytes`, shows. A main.dol without AX microcode shows neither the build nor the profile.
+// What a game's main.dol, `bytes`, shows. A main.dol without AX microcode shows neither the library nor the profile.
 GameCode CodeOf(std::span<const uint8_t> bytes)
 {
     GameCode code;
-    code.build = ReadSndBuild(bytes);
-    code.voices = ReadAxVoices(bytes);
-    code.profile = code.build ? ProfileOf(bytes) : Profile::kNone;
+    code.library = revosf2::ReadSoundLibrary(bytes);
+    code.profile = code.library ? ProfileOf(bytes) : Profile::kNone;
 
     return code;
 }
 
 // A main.dol and what it shows, with the path that the messages give it: --dol's file, the path of a game given as the
-// input, or the main.dol of the extracted disc that holds an archive.
+// input, or the main.dol of the extracted disc that holds an archive. `warning` is the warning about a main.dol that
+// was found but shows no build, or else empty.
 struct DolCode
 {
     std::string path;
     GameCode code;
+    std::string warning;
 };
 
-// Sets up the conversion of the sequences of `archive`, read from `input`, and prints which build plays it unless
-// `quiet` is set. `game` is the main.dol of the game that holds the archive, if the input was a game.
-using PrepareArchive =
-    std::function<void(const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode* game)>;
-
 // The main.dol that shows how to play `input`'s archive when --dol gives none: `game`, the main.dol of a game given as
-// the input, or else the main.dol of the extracted disc that holds the archive. Warn about a main.dol that shows no
-// build. The path is empty if there's no main.dol.
+// the input, or else the main.dol of the extracted disc that holds the archive. A main.dol that shows no build gets a
+// warning. The path is empty if there's no main.dol.
 DolCode FoundDol(const fs::path& input, const DolCode* game)
 {
     const std::string name = frame::Utf8(input.filename());
     if (game)
     {
-        if (!game->code.build)
+        DolCode found = *game;
+        if (!found.code.library)
         {
-            std::fprintf(stderr, "warning: the main.dol of %s holds no AX microcode: %s plays as its version shows\n",
-                         game->path.c_str(), name.c_str());
+            found.warning =
+                "the main.dol of " + found.path + " holds no AX microcode: " + name + " plays as its version shows";
         }
 
-        return *game;
+        return found;
     }
 
     const std::optional<fs::path> path = FindMainDol(input);
@@ -166,42 +141,50 @@ DolCode FoundDol(const fs::path& input, const DolCode* game)
         return {};
     }
 
-    DolCode found{frame::Utf8(*path), {}};
+    DolCode found{frame::Utf8(*path), {}, {}};
     const std::optional<std::vector<uint8_t>> bytes = frame::ReadFile(*path);
     if (!bytes)
     {
-        std::fprintf(stderr, "warning: can't read %s: %s plays as its version shows\n", found.path.c_str(),
-                     name.c_str());
+        found.warning = "can't read " + found.path + ": " + name + " plays as its version shows";
         return found;
     }
 
     found.code = CodeOf(*bytes);
-    if (!found.code.build)
+    if (!found.code.library)
     {
-        std::fprintf(stderr, "warning: %s holds no AX microcode: %s plays as its version shows\n", found.path.c_str(),
-                     name.c_str());
+        found.warning = found.path + " holds no AX microcode: " + name + " plays as its version shows";
     }
 
     return found;
 }
 
-// What the game's main.dol shows about `archive`, from `input`. That main.dol is `given`, from --dol, or else the one
-// that FoundDol finds. Without one, the archive's version gives the build. Say which unless `quiet` is set.
-GameCode ArchiveCode(const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode& given,
-                     const DolCode* game)
+// The main.dol that shows how to play the archive at `input`: `given`, from --dol, or else the one that FoundDol finds.
+// `game` is the main.dol of the game that holds the archive, if the input was a game.
+DolCode ArchiveDol(const fs::path& input, const DolCode& given, const DolCode* game)
 {
-    const DolCode dol = given.code.build ? given : FoundDol(input, game);
+    return given.code.library ? given : FoundDol(input, game);
+}
+
+// Prints the warning about `dol`, the main.dol that shows how to play `archive` from `input`. Unless `quiet` is set,
+// also notes which build plays the archive. Without a main.dol, the archive's version gives the build.
+void NoteDol(const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode& dol)
+{
+    if (!dol.warning.empty())
+    {
+        std::fprintf(stderr, "warning: %s\n", dol.warning.c_str());
+    }
+
     if (quiet)
     {
-        return dol.code;
+        return;
     }
 
     // A main.dol that was found but can't give the build has had its warning.
     const std::string name = frame::Utf8(input.filename());
-    if (dol.code.build)
+    if (dol.code.library)
     {
         std::fprintf(stderr, "note: %s plays as NW4R SND's %s do, by the game's main.dol (%s)\n", name.c_str(),
-                     RulesOf(*dol.code.build), dol.path.c_str());
+                     BuildWords(dol.code.library->build), dol.path.c_str());
     }
     else if (dol.path.empty() && archive.Version() < 0x0104)
     {
@@ -210,73 +193,49 @@ GameCode ArchiveCode(const fs::path& input, const SoundArchive& archive, bool qu
                      "main.dol)\n",
                      name.c_str());
     }
-
-    return dol.code;
 }
 
-// What the game's main.dol shows about the archive at `input`, as ArchiveCode finds it, without its messages. A
-// main.dol that can't be read shows nothing.
-GameCode QuietCode(const fs::path& input, const DolCode& given, const DolCode* game)
+// The archive that the frame converts: the main.dol that shows how to play it, and its pieces of several sequences.
+// `open` finds the main.dol as the archive opens. `sequences` finds the pieces. The frame lists an archive's sequences
+// before it prepares the archive.
+struct OpenedArchive
 {
-    if (given.code.build)
-    {
-        return given.code;
-    }
-    if (game)
-    {
-        return game->code;
-    }
-
-    const std::optional<fs::path> path = FindMainDol(input);
-    const std::optional<std::vector<uint8_t>> bytes = path ? frame::ReadFile(*path) : std::nullopt;
-
-    return bytes ? CodeOf(*bytes) : GameCode{};
-}
-
-// The input whose archive the frame lists: its path, and the main.dol of the game that holds it if the input was a
-// game. The frame lists an input's sequences before it prepares the input. The list takes the profile from here.
-struct ListedInput
-{
-    fs::path input;
-    const DolCode* game = nullptr;
+    DolCode dol;
+    std::vector<ntdlib::SoundPiece> pieces;
 };
 
-// `sequences` of `archive` with the variants of `variants` after their sounds (profiles.h). A variant takes the index
-// of the archive's sound count plus its place in `variants`. It takes its sound's label and the variant's suffix as its
-// name. A variant of a sound that the archive lacks isn't listed.
-std::vector<frame::Sequence> WithVariants(const SoundArchive& archive, const std::vector<frame::Sequence>& sequences,
-                                          std::span<const revosf2::Variant> variants)
+// What the command line chooses, and the archive that the frame converts. --dol names the game's main.dol
+// (`dol.path`). `before_inputs` reads the file into `dol.code`. The build that this main.dol shows plays every archive.
+// --weather and --museum choose the arrangements of City Folk's music. `open` sets `opened` for each archive. `prepare`
+// sets `settings`.
+struct State
 {
-    std::vector<frame::Sequence> listed;
-    for (const frame::Sequence& sequence : sequences)
+    DolCode dol;
+    Arrangements arrangements;
+    bool chose_arrangements = false;
+    OpenedArchive opened;
+    frame::Settings settings;
+};
+
+// The variants of each sound of `archive` in the game's profile (profiles.h), as arrangements, in the order of
+// VariantsOf. A variant plays its tracks in place of those that SetUpSound gives. `archive` has to outlive the result.
+frame::ArrangementsOf ArchiveVariants(const State& state, const SoundArchive& archive)
+{
+    return [variants = revosf2::VariantsOf(state.opened.dol.code.profile, state.chose_arrangements),
+            &archive](std::size_t sound)
     {
-        listed.push_back(sequence);
-        for (std::size_t v = 0; v < variants.size(); v++)
+        std::vector<frame::Arrangement> arrangements;
+        for (const revosf2::Variant& variant : variants)
         {
-            const std::string& label = archive.Sounds()[sequence.index].name;
-            if (variants[v].sound == label)
+            if (variant.sound == archive.Sounds()[sound].name)
             {
-                listed.push_back({archive.Sounds().size() + v, label + std::string(variants[v].suffix), {label}});
+                arrangements.push_back(
+                    {variant.suffix, [tracks = variant.tracks](PerformOptions& options) { options.tracks = tracks; }});
             }
         }
-    }
 
-    return listed;
-}
-
-// The index in `archive` of the sound labelled `label`. Throws if there's none.
-uint32_t SoundIndex(const SoundArchive& archive, std::string_view label)
-{
-    const std::vector<ntdlib::rsar::SoundInfo>& sounds = archive.Sounds();
-    for (uint32_t i = 0; i < sounds.size(); i++)
-    {
-        if (sounds[i].name == label)
-        {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("the archive holds no sound " + std::string(label));
+        return arrangements;
+    };
 }
 
 // The words for `weather` in the note on City Folk's music.
@@ -295,65 +254,47 @@ const char* WeatherWords(Weather weather)
     return "";
 }
 
-// Whether `profile` silences tracks of any sound of `archive`.
-bool SilencesTracks(Profile profile, const SoundArchive& archive)
+// What a profile changes in the sounds of an archive, for the note on the profile.
+struct ProfileChanges
 {
+    bool tracks = false;    // it silences tracks of a sound
+    bool variables = false; // it sets a variable of a sound, at the start or later
+    bool sends = false;     // it changes a sound's sends to the aux buses
+    bool variants = false;  // it converts a sound once more in a variant
+};
+
+// What `profile` changes in the sounds of `archive`, in the arrangements that the game starts its music in.
+ProfileChanges ChangesOf(Profile profile, const SoundArchive& archive)
+{
+    ProfileChanges changes;
     for (const ntdlib::rsar::SoundInfo& sound : archive.Sounds())
     {
         PerformOptions options;
         revosf2::SetUpSound(profile, {}, sound.name, options);
-        if (options.tracks != PerformOptions{}.tracks)
-        {
-            return true;
-        }
+        changes.tracks = changes.tracks || options.tracks != PerformOptions{}.tracks;
+        changes.variables = changes.variables || !options.variables.empty() || !options.changes.empty();
+        changes.sends = changes.sends || options.fx_sends != PerformOptions{}.fx_sends;
     }
 
-    return false;
-}
-
-// Whether `profile` sets a variable of any sound of `archive`.
-bool SetsVariables(Profile profile, const SoundArchive& archive)
-{
-    for (const ntdlib::rsar::SoundInfo& sound : archive.Sounds())
-    {
-        PerformOptions options;
-        revosf2::SetUpSound(profile, {}, sound.name, options);
-        if (!options.variables.empty())
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// Whether `profile` converts a sound of `archive` once more in a variant.
-bool HasVariants(Profile profile, const SoundArchive& archive)
-{
     for (const revosf2::Variant& variant : revosf2::VariantsOf(profile, false))
     {
-        for (const ntdlib::rsar::SoundInfo& sound : archive.Sounds())
-        {
-            if (sound.name == variant.sound)
-            {
-                return true;
-            }
-        }
+        changes.variants = changes.variants || archive.FindSound(std::string(variant.sound)).has_value();
     }
 
-    return false;
+    return changes;
 }
 
 // Notes how `archive`, named `name`, plays its music by `profile`, in `arrangements`. The profiles of Wii Play, Wii
-// Music, Wii Sports and Mario Kart Wii get a note only for an archive whose sounds they change. `chosen` is set when
-// --weather or --museum gives the arrangements. They change nothing in an archive without City Folk's profile. The
-// note says so.
+// Music, Wii Sports, Mario Kart Wii, City Folk and Smooth Moves get a note only for an archive whose sounds they
+// change. The channels' profiles change bus B for every sound. `chosen` is set when --weather or --museum gives the
+// arrangements. They change nothing in an archive without City Folk's profile. The note says so.
 void NoteProfile(const std::string& name, const SoundArchive& archive, Profile profile,
                  const Arrangements& arrangements, bool chosen)
 {
-    if (profile == Profile::kWiiPlay && SilencesTracks(profile, archive))
+    const ProfileChanges changes = ChangesOf(profile, archive);
+    if (profile == Profile::kWiiPlay && changes.tracks)
     {
-        const char* states = HasVariants(profile, archive)
+        const char* states = changes.variants
                                  ? " Its piece converts as the minigame starts it, and once more for each later set "
                                    "of tracks."
                                  : "";
@@ -363,7 +304,7 @@ void NoteProfile(const std::string& name, const SoundArchive& archive, Profile p
                      name.c_str(), states);
     }
 
-    if (profile == Profile::kWiiMusic && SilencesTracks(profile, archive))
+    if (profile == Profile::kWiiMusic && changes.tracks)
     {
         std::fprintf(stderr,
                      "note: %s plays its main menu's music and Pitch Perfect's beats as Wii Music starts them, "
@@ -389,7 +330,7 @@ void NoteProfile(const std::string& name, const SoundArchive& archive, Profile p
                      name.c_str());
     }
 
-    if (profile == Profile::kWiiSports && SetsVariables(profile, archive))
+    if (profile == Profile::kWiiSports && changes.variables)
     {
         std::fprintf(stderr,
                      "note: %s plays golf's wind, SE_LV_Wind, at a speed of 8 and in direction 0. Wii Sports sets "
@@ -398,7 +339,7 @@ void NoteProfile(const std::string& name, const SoundArchive& archive, Profile p
                      name.c_str());
     }
 
-    if (profile == Profile::kMarioKart && SilencesTracks(profile, archive))
+    if (profile == Profile::kMarioKart && changes.tracks)
     {
         std::fprintf(stderr,
                      "note: %s plays the music of the menus and of the Wi-Fi menus as Mario Kart Wii starts it, and "
@@ -407,7 +348,7 @@ void NoteProfile(const std::string& name, const SoundArchive& archive, Profile p
                      name.c_str());
     }
 
-    if (profile == Profile::kCityFolk)
+    if (profile == Profile::kCityFolk && (changes.tracks || changes.variables || changes.sends))
     {
         const char* others = chosen ? "--weather and --museum choose the others."
                                     : "The music converts once more in rain and in snow, and the museum's music in "
@@ -419,7 +360,7 @@ void NoteProfile(const std::string& name, const SoundArchive& archive, Profile p
                      name.c_str(), WeatherWords(arrangements.weather), arrangements.museum,
                      revosf2::kMuseumArrangements, others);
     }
-    else if (profile == Profile::kSmoothMoves)
+    else if (profile == Profile::kSmoothMoves && changes.sends)
     {
         std::fprintf(stderr,
                      "note: %s plays the music of WarioWare: Smooth Moves' microgames with the reverb of the stage "
@@ -450,18 +391,13 @@ std::string ArchiveOutput(const fs::path& game, const std::string& output, const
 int ConvertJAudioGame(const fs::path& path, std::shared_ptr<ntdlib::disc::GameFiles> game, const std::regex& only,
                       bool several, UsedFolders& used_folders, const JAudioInputs& jaudio_inputs)
 {
-    std::optional<jaudio::Game> opened = jaudio::Game::FromDiscFiles(game, "revosf2");
+    std::optional<jaudio::Game> opened = jaudio::Game::FromDiscFiles(std::move(game), kProgram, kJAudioOptions);
     if (!opened)
     {
-        std::fprintf(stderr, "%s: the game holds no Wii sound archive (.brsar) and no JAudio start-up archive (.baa)\n",
+        std::fprintf(stderr,
+                     "%s: the game holds no Wii sound archive (.brsar) and no JAudio start-up archive (.baa or .aaf)\n",
                      frame::Utf8(path.filename()).c_str());
         return 1;
-    }
-
-    // A game of kEffectsGames opens a second time, with its effects.
-    if (ListsEffects(*opened))
-    {
-        opened = jaudio::Game::FromDiscFiles(std::move(game), "revosf2", {.jaudio1_effects = true});
     }
 
     const std::string archive_path = opened->DiscPath();
@@ -476,12 +412,11 @@ int ConvertJAudioGame(const fs::path& path, std::shared_ptr<ntdlib::disc::GameFi
 
 // Converts each sound archive of the game at `input` the way frame::ConvertInput converts a loose archive. Each goes in
 // a folder of its own in the game's output folder. xsflib's ArchiveFolders names those folders the way the rip tools
-// name them. The game's main.dol gives the build unless --dol gives one (`prepare`). A game without a sound archive
-// converts as a JAudio game (ConvertJAudioGame). `several` is set when the command line has more than one input. Each
-// archive becomes `listed` as it opens. Returns 1 on any failure, otherwise 0.
+// name them. The game's main.dol gives the build unless --dol gives one (`state.dol`). A game without a sound archive
+// converts as a JAudio game (ConvertJAudioGame). `several` is set when the command line has more than one input. `open`
+// sets `state.opened` for each archive. Returns 1 on any failure, otherwise 0.
 int ConvertGame(const std::string& input, const Options& options, const std::regex& only, bool several,
-                UsedFolders& used_folders, const Converter& converter, const PrepareArchive& prepare,
-                const JAudioInputs& jaudio_inputs, ListedInput& listed)
+                UsedFolders& used_folders, const Converter& converter, State& state, const JAudioInputs& jaudio_inputs)
 {
     const fs::path path = revosf2::GamePath(frame::PathFromUtf8(input));
     const std::string name = frame::Utf8(path.filename());
@@ -500,7 +435,7 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
 
     // Each archive gets a folder of its own. The game's main.dol shows the archives' build unless --dol gives one.
     const std::vector<std::string> folders = xsflib::rip::ArchiveFolders(archives);
-    const DolCode dol{frame::Utf8(path), CodeOf(game->dol)};
+    const DolCode dol{frame::Utf8(path), CodeOf(game->dol), {}};
     int rc = 0;
     for (std::size_t a = 0; a < archives.size(); a++)
     {
@@ -520,23 +455,17 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
         // `open` reads the archive from the game, with the warnings of an archive's file. An RSAR archive takes none of
         // the settings' read options.
         Converter archive_converter = converter;
-        archive_converter.open = [&game, &archive_path, &listed, &archive_input, &dol](
+        archive_converter.open = [&game, &archive_path, &archive_input, &state, &dol](
                                      const fs::path&, const std::string& archive_name) -> std::optional<SoundArchive>
         {
-            listed = {archive_input, &dol};
             std::vector<uint8_t> bytes;
             if (!game->read_file(archive_path, bytes))
             {
                 return std::nullopt;
             }
 
+            state.opened = {ArchiveDol(archive_input, state.dol, &dol), {}};
             return frame::LoadArchive<SoundArchive>(std::move(bytes), archive_name, frame::Settings());
-        };
-
-        archive_converter.prepare = [&prepare, &dol](const fs::path& in_game, const SoundArchive& archive,
-                                                     const Options& given, PerformOptions&)
-        {
-            prepare(in_game, archive, given.quiet, &dol);
         };
 
         // An archive that fails doesn't stop the others.
@@ -557,43 +486,36 @@ int ConvertGame(const std::string& input, const Options& options, const std::reg
 
 // Processes the inputs on the command line with the frame's Run, and returns the exit status. A game converts each of
 // its sound archives (ConvertGame). A JAudio game's start-up archive converts with `games`, with the game's other files
-// beside it. Any other input converts as a loose archive. jaudio::RunArchiveConverterWithGames takes JAudio games the
-// same way.
-int Run(const std::vector<std::string>& args, const Converter& converter, const PrepareArchive& prepare,
-        const jaudio::GameConverter& games, ListedInput& listed)
+// beside it (jaudio::ArchiveProgramGames). Any other input converts as a loose archive.
+int Run(const std::vector<std::string>& args, const Converter& converter, State& state,
+        const jaudio::GameConverter& games)
 {
-    // A JAudio game takes the same options. It leaves out --dol and --var (jaudio::ArchiveProgramOptions).
+    // A JAudio game takes the same options. None of the options that revosf2 adds applies to its sequences: it leaves
+    // out --dol, --var, --weather and --museum (jaudio::ArchiveProgramOptions).
     const JAudioInputs jaudio_inputs{games, frame::ParseOptions<jaudio::PerformOptions>(args, games.option)};
-    const frame::OtherInput<PerformOptions> other = [&converter, &prepare, &games, &jaudio_inputs, &listed](
+    const frame::OtherInput<PerformOptions> archive_games = jaudio::ArchiveProgramGames(args, games);
+    const frame::OtherInput<PerformOptions> other = [&converter, &state, &jaudio_inputs, &archive_games](
                                                         const std::string& input, const Options& options,
                                                         const std::regex& only, bool several,
                                                         UsedFolders& used_folders) -> std::optional<int>
     {
-        const fs::path path = frame::PathFromUtf8(input);
-        if (revosf2::IsGameInput(path))
+        if (revosf2::IsGameInput(frame::PathFromUtf8(input)))
         {
-            return ConvertGame(input, options, only, several, used_folders, converter, prepare, jaudio_inputs, listed);
-        }
-        if (jaudio::IsStartUpArchiveFile(path))
-        {
-            const jaudio::GameConverter archive_games = jaudio::MakeOpenGameConverter(
-                games, [&path]() -> std::optional<jaudio::Game> { return OpenJAudioArchive(path); });
-            return frame::ConvertInput(input, jaudio_inputs.options, only, several, used_folders, archive_games);
+            return ConvertGame(input, options, only, several, used_folders, converter, state, jaudio_inputs);
         }
 
-        return std::nullopt;
+        return archive_games(input, options, only, several, used_folders);
     };
     return frame::Run(args, converter, other);
 }
 
-} // namespace
-
-int main(int argc, char** argv)
+// The program name, version line and the parts of the help that differ for revosf2. UsageText in ntdlib writes the
+// help. The option hook sets `state`. `state` has to outlive the result.
+frame::ArchiveConverter<SoundArchive> Program(State& state)
 {
-    // revosf2's name, version line and the parts of its help that differ. ntdlib's UsageText writes the help.
     frame::ArchiveConverter<SoundArchive> program;
-    program.program = "revosf2";
-    program.version_line = "revosf2 " REVOSF2_VERSION;
+    program.program = kProgram;
+    program.version_line = std::string(kProgram) + " " REVOSF2_VERSION;
     program.description =
         "revosf2: convert Wii sound archive sequences (.brsar) to MIDI, SoundFont 2 and\n"
         "SFZ. An input can also be a game: a Wii disc image (ISO, NKit, WBFS or WDF),\n"
@@ -604,7 +526,9 @@ int main(int argc, char** argv)
         "folder and the Waves or Banks folder beside it. Pikmin has no start-up\n"
         "archive. Give the game.\n";
     program.extension = ".brsar";
-    program.seed_option = "initial game random state (default 0x12345678)";
+    program.seed_option =
+        "initial game random state (default 0x12345678, or 0 for\n"
+        "                 a JAudio game)";
     program.extra_options =
         "  --dol FILE     the game's main.dol, for the build of the game's sound library\n"
         "                 (default: the game's main.dol when the input is a game, or\n"
@@ -614,19 +538,14 @@ int main(int argc, char** argv)
         "  --museum N     convert City Folk's museum music in one arrangement, from 1\n"
         "                 to 7 (default: 1 to 6)\n";
 
-    // --dol names the game's main.dol. The build that it shows plays every archive. --weather and --museum choose the
-    // arrangements of City Folk's music.
-    DolCode dol;
-    Arrangements arrangements;
-    bool chose_arrangements = false;
-    program.option = [&dol, &arrangements, &chose_arrangements](const std::string& option, frame::OptionReader& reader,
-                                                                PerformOptions& perform)
+    program.option = [&state](const std::string& option, frame::OptionReader& reader, PerformOptions& perform)
     {
         if (option == "--dol")
         {
-            dol.path = reader.Value();
+            state.dol.path = reader.Value();
             return true;
         }
+
         if (option == "--weather")
         {
             const std::string value = reader.Value();
@@ -636,67 +555,75 @@ int main(int argc, char** argv)
                 throw std::runtime_error("--weather requires fine, rain or snow, not " + value);
             }
 
-            arrangements.weather = *weather;
-            chose_arrangements = true;
+            state.arrangements.weather = *weather;
+            state.chose_arrangements = true;
             return true;
         }
+
         if (option == "--museum")
         {
-            arrangements.museum = static_cast<int>(reader.Number(revosf2::kMuseumArrangements));
-            if (arrangements.museum == 0)
+            state.arrangements.museum = static_cast<int>(reader.Number(revosf2::kMuseumArrangements));
+            if (state.arrangements.museum == 0)
             {
                 throw std::runtime_error("--museum 0 is out of range");
             }
 
-            chose_arrangements = true;
+            state.chose_arrangements = true;
             return true;
         }
 
         return frame::VarOption(option, reader, perform);
     };
 
-    // Each archive plays by the build that its game's main.dol shows, or else by the one its version gives. A game with
-    // a profile sets up the sounds that its code sets up as it starts them. The archive's pieces of several sequences
-    // are found once, before its first conversion.
-    frame::Settings settings;
-    Profile profile = Profile::kNone;
-    std::vector<revosf2::Piece> pieces;
-    const PrepareArchive prepare =
-        [&dol, &arrangements, &chose_arrangements, &settings, &profile, &pieces](
-            const fs::path& input, const SoundArchive& archive, bool quiet, const DolCode* game)
+    return program;
+}
+
+// Converts sound `index` of `archive`, set up as the game's code sets it up (SetUpSound). An index past the archive's
+// sounds is a variant (frame::WithArrangements). A piece of several sequences converts as one (ntdlib/sound_pieces.h).
+frame::Conversion ConvertSound(const State& state, const SoundArchive& archive, std::size_t index,
+                               const PerformOptions& perform)
+{
+    const frame::ArrangedSound at = frame::ArrangedSoundAt(index, archive.Sounds().size());
+    PerformOptions options = perform;
+    revosf2::SetUpSound(state.opened.dol.code.profile, state.arrangements, archive.Sounds()[at.sound].name, options);
+    frame::SetUpArrangement(at, ArchiveVariants(state, archive), options);
+    const ntdlib::SoundPiece* piece = at.arrangement ? nullptr : ntdlib::PieceStartingAt(state.opened.pieces, at.sound);
+    if (piece)
     {
-        const GameCode code = ArchiveCode(input, archive, quiet, dol, game);
-        if (!quiet)
-        {
-            NoteProfile(frame::Utf8(input.filename()), archive, code.profile, arrangements, chose_arrangements);
-        }
+        return frame::ConvertTogether(archive, piece->sounds, piece->name, options, state.settings, kProgram);
+    }
 
-        settings = frame::RevolutionSettings(code.build.value_or(frame::BuildOfRsarVersion(archive.Version())));
-        settings.voices = code.voices.value_or(settings.voices);
-        profile = code.profile;
-        pieces = revosf2::FindPieces(archive);
-    };
+    return frame::ConvertSequence(archive, static_cast<uint32_t>(at.sound), options, state.settings, kProgram);
+}
 
-    // The frame's converter of a loose archive, from frame::MakeArchiveConverter. An input can be a game too. A loose
-    // archive becomes `listed` as it opens. ConvertGame sets `listed` for a game's archives.
+// The frame's converter of a loose archive, from frame::MakeArchiveConverter. An input can be a game too. `open` sets
+// `state.opened` for each loose archive, with the main.dol that --dol gives or FoundDol finds. ConvertGame sets it for
+// a game's archives. `program` and `state` have to outlive the converter.
+Converter MakeConverter(const frame::ArchiveConverter<SoundArchive>& program, State& state)
+{
     Converter converter = frame::MakeArchiveConverter(program);
     converter.input_word = "input";
-    ListedInput listed;
     const auto open_archive = converter.open;
-    converter.open = [open_archive, &listed](const fs::path& input, const std::string& name)
+    converter.open = [open_archive, &state](const fs::path& input, const std::string& name)
     {
-        listed = {input, nullptr};
-        return open_archive(input, name);
+        std::optional<SoundArchive> archive = open_archive(input, name);
+        if (archive)
+        {
+            state.opened = {ArchiveDol(input, state.dol, nullptr), {}};
+        }
+
+        return archive;
     };
 
     // --dol's main.dol is read before the inputs.
-    converter.before_inputs = [&dol]
+    converter.before_inputs = [&state]
     {
+        DolCode& dol = state.dol;
         if (!dol.path.empty())
         {
             const std::optional<std::vector<uint8_t>> bytes = frame::ReadFile(frame::PathFromUtf8(dol.path));
             dol.code = bytes ? CodeOf(*bytes) : GameCode{};
-            if (!dol.code.build)
+            if (!dol.code.library)
             {
                 throw std::runtime_error(bytes ? dol.path + " holds no AX microcode: it isn't a game's main.dol"
                                                : "can't read " + dol.path);
@@ -704,57 +631,56 @@ int main(int argc, char** argv)
         }
     };
 
-    // Each archive plays by its build and profile.
+    // A piece of several sequences converts as one (ntdlib/sound_pieces.h). A sound with variants converts once more
+    // for each (profiles.h). This hook finds the archive's pieces. The frame runs it once for each archive. --only
+    // picks a variant with its sound.
+    converter.sequences = [&state](const SoundArchive& archive)
+    {
+        state.opened.pieces = ntdlib::FindSoundPieces(archive, ntdlib::kMegaMan9Channels);
+        return frame::WithArrangements(
+            frame::ArchiveSequences(archive, std::span<const ntdlib::SoundPiece>(state.opened.pieces)),
+            archive.Sounds().size(), ArchiveVariants(state, archive), true);
+    };
+
+    // Each archive plays by the build that the game's main.dol shows, or else by the build that the archive's version
+    // gives.
     converter.prepare =
-        [&prepare](const fs::path& input, const SoundArchive& archive, const Options& options, PerformOptions&)
+        [&state](const fs::path& input, const SoundArchive& archive, const Options& options, PerformOptions&)
     {
-        prepare(input, archive, options.quiet, nullptr);
-    };
-
-    // A piece of several sequences converts as one (pieces.h). A sound with variants converts once more for each
-    // (profiles.h). The list takes the profile from the input's main.dol.
-    converter.sequences = [&dol, &listed, &chose_arrangements](const SoundArchive& archive)
-    {
-        const Profile listed_profile = QuietCode(listed.input, dol, listed.game).profile;
-        return WithVariants(archive, revosf2::ArchiveSequences(archive),
-                            revosf2::VariantsOf(listed_profile, chose_arrangements));
-    };
-    converter.convert = [&settings, &profile, &arrangements, &chose_arrangements, &pieces](
-                            SoundArchive& archive, std::size_t index, const PerformOptions& perform)
-    {
-        const std::size_t sounds = archive.Sounds().size();
-        if (index >= sounds)
+        NoteDol(input, archive, options.quiet, state.opened.dol);
+        if (!options.quiet)
         {
-            const std::span<const revosf2::Variant> variants = revosf2::VariantsOf(profile, chose_arrangements);
-            if (index - sounds >= variants.size())
-            {
-                throw std::runtime_error("no variant " + std::to_string(index - sounds) + " in the game's profile");
-            }
-
-            const revosf2::Variant& variant = variants[index - sounds];
-            PerformOptions options = perform;
-            revosf2::SetUpSound(profile, arrangements, variant.sound, options);
-            options.tracks = variant.tracks;
-            return frame::ConvertSequence(archive, SoundIndex(archive, variant.sound), options, settings, "revosf2");
+            NoteProfile(frame::Utf8(input.filename()), archive, state.opened.dol.code.profile, state.arrangements,
+                        state.chose_arrangements);
         }
 
-        PerformOptions options = perform;
-        revosf2::SetUpSound(profile, arrangements, archive.Sounds()[index].name, options);
-        if (const std::optional<revosf2::Piece> piece = revosf2::PieceAt(pieces, index))
-        {
-            return frame::ConvertTogether(archive, piece->sounds, piece->name, options, settings, "revosf2");
-        }
-
-        return frame::ConvertSequence(archive, static_cast<uint32_t>(index), options, settings, "revosf2");
+        state.settings = revosf2::ArchiveSettings(state.opened.dol.code.library, archive.Version());
     };
+
+    converter.convert = [&state](SoundArchive& archive, std::size_t index, const PerformOptions& perform)
+    {
+        return ConvertSound(state, archive, index, perform);
+    };
+
+    return converter;
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    State state;
+    const frame::ArchiveConverter<SoundArchive> program = Program(state);
+    const Converter converter = MakeConverter(program, state);
 
     // The frame's converter of JAudio games, for a Wii game that plays its music with JAudio.
-    const jaudio::GameConverter games = jaudio::MakeGameConverter(
-        program.program, program.version_line, jaudio::ArchiveProgramOptions(converter.option), converter.usage);
+    const jaudio::GameConverter games =
+        jaudio::MakeGameConverter(program.program, program.version_line,
+                                  jaudio::ArchiveProgramOptions(converter.option), converter.usage, kJAudioOptions);
 
-    const auto run = [&converter, &prepare, &games, &listed](const std::vector<std::string>& args)
+    const auto run = [&converter, &state, &games](const std::vector<std::string>& args)
     {
-        return Run(args, converter, prepare, games, listed);
+        return Run(args, converter, state, games);
     };
     return frame::RunMain(argc, argv, run);
 }
