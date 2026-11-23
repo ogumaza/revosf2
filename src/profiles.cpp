@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// The profiles of games (see profiles.h). ntdlib's game_setups.h holds the SHA-1s of the games' main.dol files and the
-// tables of what the games set up for their sounds, with the addresses in the games' code. The profiles below set up
-// the performance of a sound from those tables. Some set-ups use no table of ntdlib: the dry pieces of Smooth Moves,
+// The profiles of games (see profiles.h). ntdlib's game_setups.h contains the SHA-1s of the games' main.dol files and
+// the tables of what the games set up for their sounds, with the addresses in the games' code. The profiles below set
+// up the performance of a sound from those tables. Some set-ups use no table of ntdlib: the dry pieces of Smooth Moves,
 // the steps of City Folk's gyroids, and the lost sends on bus B of the Mii Channel and the Wii Shop Channel.
 
 #include "profiles.h"
@@ -56,18 +56,18 @@ constexpr std::array<ProfileDol, 11> kProfileDols = {{
 }};
 
 // A send of -1 from a sound to a bus brings the sum of the sound send and each track send down to 0 or below. Every
-// CC91 for bus A, or CC93 for bus B, then holds 0. The send stands in for a bus without an effect: AX mixes a bus into
-// the output only once an effect's callback is set on it.
+// CC91 for bus A, or CC93 for bus B, is then 0. The send stands in for a bus without an effect: AX mixes a bus into the
+// output only once an effect's callback is set on it.
 constexpr float kNoSend = -1.0f;
 
-// The tracks that `starts` gives the sound named `sound` as the game starts it. Nothing if `starts` doesn't name it.
+// The start tracks that `starts` lists for the sound named `sound`. Nothing if `starts` doesn't name it.
 std::optional<uint16_t> StartTracksOf(std::span<const snd::StartTracks> starts, std::string_view sound)
 {
     const auto start = std::ranges::find(starts, sound, &snd::StartTracks::sound);
     return start == starts.end() ? std::nullopt : std::optional<uint16_t>(start->tracks);
 }
 
-// Gives each variable that `values` names for the sound named `sound` its value, unless --var gives one.
+// Sets each variable that `values` names for the sound named `sound` to its value, unless --var sets it.
 void SetStartVariables(std::span<const snd::StartVariable> values, std::string_view sound, PerformOptions& perform)
 {
     for (const snd::StartVariable& value : values)
@@ -80,7 +80,7 @@ void SetStartVariables(std::span<const snd::StartVariable> values, std::string_v
 }
 
 // The variants of a game's table `variants`. A variant's files add "_" and the words of its state to the sound's label,
-// with "_" in place of each space. A variant holds no tempo. A state that plays at another tempo gets no conversion.
+// with "_" in place of each space. A variant has no tempo. A state that plays at another tempo gets no conversion.
 std::vector<Variant> VariantsIn(std::span<const snd::TrackVariant> variants)
 {
     std::vector<Variant> found;
@@ -103,7 +103,7 @@ std::vector<Variant> VariantsIn(std::span<const snd::TrackVariant> variants)
 // 2, a sequence's variable 18. The start of the music sets the count to 0 (0x801d4510, from 0x801cbc74). 0x801d4384
 // reads the music's tick and adds 1 to the count each time the tick passes a step. After 15, the count goes back to 0
 // (0x801d445c to 0x801d4494). A gyroid's sequence copies the variable as it starts. The sequence plays a step each time
-// the variable changes. The profile plays one step: one frame after the start, the variable takes the count's next
+// the variable changes. The profile plays one step: one frame after the start, the variable changes to the count's next
 // value. Without --var, the Wii's global variables start at 0.
 constexpr uint8_t kStepVariable = 18;
 constexpr int16_t kLastStep = 15;
@@ -115,11 +115,11 @@ constexpr int16_t kLastStep = 15;
 // the game, each piece plays through its stage's reverb. The profile plays each piece as the stage that plays it first
 // in the story does. For every microgame, that's the stage of its character: bits 0 to 9 of the flags at +0xc of its
 // record in the table at 0x804dd970. Each character's boss ends that character's stage. The stage switch's table at
-// 0x80547568 gives each stage's setup. The setups give the lists of microgames. The stages of Young Cricket, Penny,
-// 9-Volt and Tiny Wario clear the bus. Dr. Crygor's stage clears it before its microgames' music
-// (SEQ_M_TSUNAGI_CRYGOR_NEXT1_1). In a conversion, the pieces that these stages play first send nothing to the synth's
-// reverb: CC91 0. Those of the other stages keep their sends. The list holds the pieces that send to bus A, by stage:
-// Young Cricket's, Penny's, 9-Volt's and Tiny Wario's. Dr. Crygor's pieces are SEQ_M_PETIT_CRYGOR_GAME*.
+// 0x80547568 lists each stage's setup. The setups list the microgames. The stages of Young Cricket, Penny, 9-Volt and
+// Tiny Wario clear the bus. Dr. Crygor's stage clears it before its microgames' music (SEQ_M_TSUNAGI_CRYGOR_NEXT1_1).
+// In a conversion, the pieces that these stages play first send nothing to the synth's reverb: CC91 0. Those of the
+// other stages keep their sends. The list contains the pieces that send to bus A, by stage: Young Cricket's, Penny's,
+// 9-Volt's and Tiny Wario's. Dr. Crygor's pieces are SEQ_M_PETIT_CRYGOR_GAME*.
 constexpr std::array<std::string_view, 144> kSmoothMovesDryPieces = {
     "SEQ_M_BOSS_BLOCK1",
     "SEQ_M_BOSS_BLOCK1_OK",
@@ -277,7 +277,7 @@ void SetUpSmoothMovesSound(std::string_view sound, PerformOptions& perform)
 }
 
 // City Folk's profile plays each hourly piece and each piece of town music with the tracks of the weather that
-// --weather gives (snd::kCityFolkPieces), and the museum's music in the arrangement that --museum gives
+// --weather selects (snd::kCityFolkPieces), and the museum's music in the arrangement that --museum selects
 // (snd::kCityFolkMuseumTracks). Without --weather and --museum, each piece converts once more in each arrangement that
 // the game doesn't start it in (snd::kCityFolkVariants). The music sends to bus A are those that the game sets as it
 // starts the music (snd::kCityFolkMusicSend and kCityFolkSongSend).
@@ -329,7 +329,7 @@ void SetUpWiiPlaySound(std::string_view sound, PerformOptions& perform)
 //
 // Pitch Perfect's phrases and the jingles of its pictures send to bus A (snd::IsPitchPerfectSendSound and
 // kPitchPerfectSend). In a jam session, the instrument engine sets sends on the instruments that a player plays
-// (0x8036a8ec, 0x80373ce4 and 0x8041457c). The stage picks them. The archive doesn't give the stage. The conversions
+// (0x8036a8ec, 0x80373ce4 and 0x8041457c). The stage picks them. The archive doesn't name the stage. The conversions
 // leave these sends out.
 void SetUpWiiMusicSound(std::string_view sound, PerformOptions& perform)
 {
@@ -373,7 +373,7 @@ void SetUpWiiShopChannelSound(PerformOptions& perform)
     perform.fx_sends[1] = kNoSend;
 }
 
-// Golf's wind plays at a speed of 8 and in direction 0 (snd::kWiiSportsWind). --var gives another speed or direction.
+// Golf's wind plays at a speed of 8 and in direction 0 (snd::kWiiSportsWind). --var sets another speed or direction.
 void SetUpWiiSportsSound(std::string_view sound, PerformOptions& perform)
 {
     SetStartVariables(snd::kWiiSportsWind, sound, perform);
@@ -381,9 +381,9 @@ void SetUpWiiSportsSound(std::string_view sound, PerformOptions& perform)
 
 // Mario Kart Wii changes the tracks of two pieces of the music in its menus with the menus (snd::kMarioKartStarts).
 // Each piece's conversion plays state 0. Its variants play the others (snd::kMarioKartVariants). In SEQ_O_SELECT's
-// states 1 and 2, track 0 plays at 0.93 of its volume. A conversion can't hold that level, and plays it 0.63 dB louder.
-// Six sound effects start with variable 0 at the value of their first play (snd::kMarioKartValues). --var gives another
-// value.
+// states 1 and 2, track 0 plays at 0.93 of its volume. A conversion can't express that level, and plays it 0.63 dB
+// louder. Six sound effects start with variable 0 at the value of their first play (snd::kMarioKartValues). --var sets
+// another value.
 void SetUpMarioKartSound(std::string_view sound, PerformOptions& perform)
 {
     perform.tracks = StartTracksOf(snd::kMarioKartStarts, sound).value_or(perform.tracks);
@@ -438,6 +438,14 @@ std::vector<Variant> VariantsOf(Profile profile, bool chosen)
     }
 
     return profile == Profile::kMarioKart ? VariantsIn(snd::kMarioKartVariants) : std::vector<Variant>();
+}
+
+std::vector<Variant> VariantsOfSound(Profile profile, bool chosen, std::string_view sound)
+{
+    std::vector<Variant> found = VariantsOf(profile, chosen);
+    std::erase_if(found, [sound](const Variant& variant) { return variant.sound != sound; });
+
+    return found;
 }
 
 void SetUpSound(Profile profile, const Arrangements& arrangements, std::string_view sound, PerformOptions& perform)

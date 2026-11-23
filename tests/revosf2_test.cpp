@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-// Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the settings that the sound library gives an
-// archive (ArchiveSettings), the low-pass that the Wii's settings give the builds from November 2008, the profiles of
-// games, the search for Mega Man 9's pieces of several sequences (ntdlib::FindSoundPieces), and which inputs are games.
-// Given a sound archive (.brsar), also converts every sequence and every piece of several sequences in it with the
-// Wii's settings, and checks each conversion. A main.dol after the archive gives the build of NW4R SND. With --jaudio,
-// writes a small JAudio game for the tests of revosf2's JAudio inputs instead. The tests of seqlib, xsflib and ntdlib
-// hold the unit tests of the code that revosf2 shares with the other converters.
+// Tests of revosf2's code: the build of NW4R SND that a main.dol shows, the settings that the sound library sets for an
+// archive (ArchiveSettings), the profiles of games, and which inputs are games. ntdlib's tests cover the low-pass of
+// the Wii's settings and the search for Mega Man 9's pieces of several sequences. Given a sound archive (.brsar), also
+// converts every sequence and every piece of several sequences in it with the Wii's settings, and checks each
+// conversion. A main.dol after the archive sets the build of NW4R SND. With --jaudio, writes a small JAudio game for
+// the tests of revosf2's JAudio inputs instead. The tests of seqlib, xsflib and ntdlib contain the unit tests of the
+// code that revosf2 shares with the other converters.
 //
 //     revosf2_test [<archive.brsar> [<main.dol>]]
 //     revosf2_test --jaudio <folder>
@@ -26,22 +26,19 @@
 #include <vector>
 
 #include "ntdlib/disc/game.h"
-#include "ntdlib/disc/header.h"
 #include "ntdlib/rsar/formats.h"
-#include "ntdlib/sequence_export/archive_converter.h"
 #include "ntdlib/sequence_export/consoles.h"
 #include "ntdlib/sequence_export/convert.h"
-#include "ntdlib/sequence_export/filter.h"
 #include "ntdlib/sequence_export/frame.h"
 #include "ntdlib/sequence_export/performance.h"
 #include "ntdlib/sequence_export/settings.h"
 #include "ntdlib/sound_pieces.h"
+#include "ntdlib/testing/disc_files.h"
 #include "ntdlib/testing/dol_files.h"
 #include "ntdlib/testing/jaudio_files.h"
-#include "ntdlib/testing/rsar_files.h"
 #include "ntdlib/testing/sequence_export_check.h"
-#include "xsflib/bytes.h"
 #include "xsflib/files.h"
+#include "xsflib/rip/tool.h"
 #include "xsflib/testing/check.h"
 #include "xsflib/testing/temp_folder.h"
 
@@ -51,18 +48,16 @@
 #include "snd_build.h"
 
 using ntdlib::sequence_export::PerformOptions;
-using ntdlib::sequence_export::RevolutionSettings;
 using ntdlib::sequence_export::Settings;
-using ntdlib::sequence_export::SfzLowPassCutoff;
-using ntdlib::sequence_export::ToSoundFont;
-using ntdlib::sequence_export::TrackFilters;
 using ntdlib::testing::MicrocodeDol;
 using xsflib::testing::failures;
+
+namespace disc_files = ntdlib::testing::disc_files;
 
 namespace
 {
 
-// Write `bytes` to the file at `path`. A failed write fails the check.
+// Writes `bytes` to the file at `path`. A failed write fails the check.
 void WriteBytes(const std::filesystem::path& path, std::span<const uint8_t> bytes)
 {
     XSFLIB_CHECK(!xsflib::WriteFile(path, bytes));
@@ -101,10 +96,10 @@ void TestMainDolShowsTheBuild()
 
 void TestArchiveSettingsFollowTheLibrary()
 {
-    // Without a main.dol, the archive's RSAR version gives the build (BuildOfRsarVersion): a build from June 2008 for
-    // version 1.4 or later, and otherwise a build of 2007. Both play 96 voices. With a main.dol, its sound library
-    // gives the build and the voices. A build without a banner plays as the build of October 2006. With AX of October
-    // 2006, it plays 64 voices. With a later AX, it keeps that AX's 96 voices.
+    // Without a main.dol, the RSAR version of the archive sets the build (BuildOfRsarVersion): a build from June 2008
+    // for version 1.4 or later, and otherwise a build of 2007. Both play 96 voices. With a main.dol, the sound library
+    // in it sets the build and the voices. A build without a banner plays as the build of October 2006. With AX of
+    // October 2006, it plays 64 voices. With a later AX, it keeps that AX's 96 voices.
     const Settings version_1_4 = revosf2::ArchiveSettings(std::nullopt, 0x0104);
     const Settings version_1_1 = revosf2::ArchiveSettings(std::nullopt, 0x0101);
     const Settings old_ax = revosf2::ArchiveSettings(revosf2::ReadSoundLibrary(MicrocodeDol(0x120, "")), 0x0104);
@@ -120,7 +115,7 @@ void TestArchiveSettingsFollowTheLibrary()
     XSFLIB_CHECK(later_ax.wii_build.October2006() && later_ax.voices == 96);
 }
 
-// The performance that `profile` sets up for `sound` in `arrangements`. --var gives `variables`.
+// The performance that `profile` sets up for `sound` in `arrangements`. --var sets `variables`.
 PerformOptions SetUp(revosf2::Profile profile, std::string_view sound, const revosf2::Arrangements& arrangements = {},
                      std::map<uint8_t, int16_t> variables = {})
 {
@@ -173,8 +168,8 @@ void TestWiiPlayMutesTracks()
 void TestChannelsSetUpTheirSounds()
 {
     // With the Mii Channel's profile, the music plays every track but 10 and 11, and each other sound sends 0.2 to bus
-    // A. Every sound of both channels takes its tracks' sends on bus B to 0. The Mii Channel's music converts once more
-    // in each of three other sets of tracks. The Wii Shop Channel leaves the tracks and bus A as the archive gives
+    // A. Every sound of both channels sets the sends of its tracks on bus B to 0. The Mii Channel's music converts once
+    // more in each of three other sets of tracks. The Wii Shop Channel leaves the tracks and bus A as the archive sets
     // them, and has no variants.
     const PerformOptions music = SetUp(revosf2::Profile::kMiiChannel, "SEQ_TMP_BGM");
     const PerformOptions effect = SetUp(revosf2::Profile::kMiiChannel, "SEQ_OK");
@@ -199,7 +194,7 @@ void TestChannelsSetUpTheirSounds()
 
 void TestWiiSportsSetsTheWind()
 {
-    // Golf's wind plays at a speed of 8 and in direction 0, unless --var gives its variables. No other sound gets a
+    // Golf's wind plays at a speed of 8 and in direction 0, unless --var sets its variables. No other sound gets a
     // variable, and the profile has no variants.
     const PerformOptions wind = SetUp(revosf2::Profile::kWiiSports, "SE_LV_Wind");
     const PerformOptions given = SetUp(revosf2::Profile::kWiiSports, "SE_LV_Wind", {}, {{0, 15}});
@@ -213,8 +208,8 @@ void TestWiiSportsSetsTheWind()
 
 void TestCityFolkPlaysTheOtherArrangements()
 {
-    // In rain and snow, each hourly piece and each piece of town music plays the tracks of the weather's mask, with
-    // the same send. The town music leaves out track 15 in every weather. --museum N plays the tracks of the museum's
+    // In rain and snow, each hourly piece and each piece of town music plays the tracks of the weather's mask, with the
+    // same send. The town music leaves out track 15 in every weather. --museum N plays the tracks of the museum's
     // arrangement N. The weather leaves the museum's music and the songs as they are, and the museum's arrangement
     // leaves the other music as it is.
     const revosf2::Profile kCityFolk = revosf2::Profile::kCityFolk;
@@ -246,9 +241,9 @@ void TestCityFolkPlaysTheOtherArrangements()
 
 void TestCityFolkStepsItsGyroids()
 {
-    // One frame after a gyroid's sound starts, the music takes its next step: variable 18 goes from 0 to 1. From --var
-    // 18=15, the step wraps to 0. The game's count does the same. The profile changes no variable of the music, and
-    // without the profile a gyroid's sound changes none.
+    // One frame after a gyroid's sound starts, the music moves to its next step: variable 18 goes from 0 to 1. From
+    // --var 18=15, the step wraps to 0. The game's count does the same. The profile changes no variable of the music,
+    // and without the profile a gyroid's sound changes none.
     const auto is_step = [](const PerformOptions& options, int16_t value)
     {
         const std::vector<ntdlib::sequence_export::VariableChange>& changes = options.changes;
@@ -270,7 +265,7 @@ void TestMarioKartSetsItsEffectsVariable()
 {
     // With Mario Kart Wii's profile, six sound effects start with variable 0 at the value of their first play in the
     // game: 1 for SE_RC_RANK_UP, 0 for the other five. SE_CC_MSR_GATE_PASS keeps -1, the value without a variable.
-    // --var gives another value. Without the profile, the effects set no variable.
+    // --var sets another value. Without the profile, the effects set no variable.
     const auto first = [](std::string_view sound, int16_t value)
     {
         const std::map<uint8_t, int16_t> set = SetUp(revosf2::Profile::kMarioKart, sound).variables;
@@ -293,108 +288,29 @@ void TestMarioKartSetsItsEffectsVariable()
 
 void TestWeathersHaveNames()
 {
-    // --weather takes the names of the three weathers. Any other name is no weather.
+    // --weather accepts the names of the three weathers. Any other name is no weather.
     XSFLIB_CHECK(revosf2::WeatherNamed("fine") == revosf2::Weather::kFine);
     XSFLIB_CHECK(revosf2::WeatherNamed("rain") == revosf2::Weather::kRain);
     XSFLIB_CHECK(revosf2::WeatherNamed("snow") == revosf2::Weather::kSnow);
     XSFLIB_CHECK(!revosf2::WeatherNamed("Rain") && !revosf2::WeatherNamed("hail") && !revosf2::WeatherNamed(""));
 }
 
-void TestPiecesAreFoundByTheirLabels()
-{
-    // Four sequences whose labels are one name followed by _S1, _S2, _TR and _NO make a piece. It takes the name and
-    // the place of its first sequence in the list. Three of the four labels make no piece. A stream with the first
-    // label doesn't start one. Neither does a label that is only the first ending.
-    const std::vector<uint8_t> bytes = ntdlib::testing::rsar_files::MakeSoundTable({{"SEQ_TITLE_S1", 1, 0},
-                                                                                    {"SEQ_TITLE_S2", 1, 0},
-                                                                                    {"SEQ_TITLE_TR", 1, 0},
-                                                                                    {"SEQ_TITLE_NO", 1, 0},
-                                                                                    {"SEQ_JINGLE", 1, 0},
-                                                                                    {"SEQ_SHORT_S1", 1, 0},
-                                                                                    {"SEQ_SHORT_S2", 1, 0},
-                                                                                    {"SEQ_SHORT_TR", 1, 0},
-                                                                                    {"STRM_S1", 2, 0},
-                                                                                    {"STRM_S2", 1, 0},
-                                                                                    {"STRM_TR", 1, 0},
-                                                                                    {"STRM_NO", 1, 0},
-                                                                                    {"_S1", 1, 0}},
-                                                                                   {"PLAYER_BGM"});
-    const ntdlib::rsar::SoundArchive archive = ntdlib::rsar::SoundArchive::Load(bytes);
-
-    const std::vector<ntdlib::SoundPiece> pieces = ntdlib::FindSoundPieces(archive, ntdlib::kMegaMan9Channels);
-    const std::vector<ntdlib::sequence_export::Sequence> sequences =
-        ntdlib::sequence_export::ArchiveSequences(archive, std::span<const ntdlib::SoundPiece>(pieces));
-
-    std::vector<std::string> names;
-    for (const ntdlib::sequence_export::Sequence& sequence : sequences)
-    {
-        names.push_back(sequence.name);
-    }
-
-    const std::vector<std::string> kNames = {"SEQ_TITLE", "SEQ_JINGLE", "SEQ_SHORT_S1", "SEQ_SHORT_S2", "SEQ_SHORT_TR",
-                                             "STRM_S2",   "STRM_TR",    "STRM_NO",      "_S1"};
-    const std::vector<std::string> kLabels = {"SEQ_TITLE_S1", "SEQ_TITLE_S2", "SEQ_TITLE_TR", "SEQ_TITLE_NO"};
-    XSFLIB_CHECK(pieces.size() == 1 && pieces[0].name == "SEQ_TITLE" &&
-                 pieces[0].sounds == (std::vector<uint32_t>{0, 1, 2, 3}));
-    XSFLIB_CHECK(names == kNames && sequences[0].index == 0 && sequences[0].labels == kLabels &&
-                 sequences[1].labels.empty());
-    XSFLIB_CHECK(ntdlib::PieceStartingAt(pieces, 0) && !ntdlib::PieceStartingAt(pieces, 1));
-}
-
-void TestNovember2008LowPassSteps()
-{
-    // The build of November 20 2008 takes the track low-pass's cutoff from a table (Util::CalcLpfFreq). A value below
-    // 0.13561438 gives 80 Hz. A value from 0.9 gives 16000 Hz and turns the filter off. Between them, each thirtieth
-    // moves one step up the table. Arguments 0 to 10 therefore give 80 Hz, 30 gives 640 Hz and 33 gives 1000 Hz. From
-    // 58 on, the filter is off, as in the earlier builds. The build of September 19 2008 computes 1000 Hz at 32. AX
-    // gets the same cutoff from both builds there. The SoundFont and SFZ cutoffs must match too.
-    const revosf2::SndBuild november_build{.date = 20081120};
-    const revosf2::SndBuild september_build{.date = 20080919};
-
-    const Settings november = RevolutionSettings(november_build);
-    const Settings september = RevolutionSettings(september_build);
-
-    const std::span<const uint16_t> hz = november.filters->low_pass_hz;
-    XSFLIB_CHECK(november_build.SinceNovember2008() && !september_build.SinceNovember2008());
-    XSFLIB_CHECK(hz.size() == 58 && hz[0] == 80 && hz[10] == 80 && hz[11] == 100 && hz[30] == 640 && hz[32] == 800 &&
-                 hz[33] == 1000 && hz[57] == 12800);
-    XSFLIB_CHECK(september.filters->low_pass_hz[32] == 1000);
-    XSFLIB_CHECK(TrackFilters(57, 0, 0, november).low_pass == 57 && TrackFilters(58, 0, 0, november).low_pass < 0);
-    XSFLIB_CHECK(ToSoundFont(TrackFilters(33, 0, 0, november), november) ==
-                 ToSoundFont(TrackFilters(32, 0, 0, september), september));
-    XSFLIB_CHECK(SfzLowPassCutoff(33, november) == SfzLowPassCutoff(32, september));
-}
-
-// A Wii disc image whose game partition is encrypted. A dump of a disc stores the partition that way. The image holds
-// the disc header, a partition table that lists the game partition, and the partition's header (WiiBrew's "Wii disc").
-// The partition's data doesn't start with a disc header. ntdlib reads zeros past an image's end. The image therefore
-// ends with the partition's header.
+// A Wii disc image whose game partition is encrypted. A dump of a disc stores the partition that way. The image
+// contains the disc header, a partition table that lists the game partition, and the partition's header (ntdlib's
+// disc_files). The partition's data doesn't start with a disc header. ntdlib reads zeros past an image's end. The image
+// therefore ends with the partition's header.
 std::vector<uint8_t> EncryptedWiiImage()
 {
-    constexpr std::size_t kTable = 0x40000;
-    constexpr std::size_t kEntries = 0x40020;
-    constexpr std::size_t kPartition = 0x50000;
-    std::vector<uint8_t> image(kPartition + 0x2C0);
-    xsflib::StoreBe32(image.data() + ntdlib::disc::kWiiMagicOffset, ntdlib::disc::kWiiMagic);
-
-    // The table's first group holds one partition, at kPartition. Its type, 0, makes it the game partition. The table
-    // gives offsets divided by 4.
-    xsflib::StoreBe32(image.data() + kTable, 1);
-    xsflib::StoreBe32(image.data() + kTable + 4, kEntries >> 2);
-    xsflib::StoreBe32(image.data() + kEntries, kPartition >> 2);
-
-    // The partition's header gives the TMD's size and offset, and the offset of the partition's data. The offsets are
-    // divided by 4 too.
-    xsflib::StoreBe32(image.data() + kPartition + 0x2A4, 0x20);
-    xsflib::StoreBe32(image.data() + kPartition + 0x2A8, 0x2C0 >> 2);
-    xsflib::StoreBe32(image.data() + kPartition + 0x2B8, 0x20000 >> 2);
+    std::vector<uint8_t> image = disc_files::DiscHeader(ntdlib::disc::Console::kWii);
+    image.resize(disc_files::kPartition + disc_files::kTmdOffset);
+    disc_files::WriteGamePartition(image, 0x20, 0x20000, 0);
 
     return image;
 }
 
 void TestGamesAreFoldersImagesAndTitleFiles()
 {
-    // A folder is a game if it holds an extracted disc, with sys/main.dol directly or in a DATA folder, or a title's
+    // A folder is a game if it contains an extracted disc, with sys/main.dol directly or in a DATA folder, or a title's
     // TMD or contents, whatever the case of their extensions. Another folder isn't, and neither is one whose only title
     // file is an AppleDouble file, or a folder named like a content. A disc image is a game, by its first bytes. So is
     // a file that LoadGame has a message for, such as a WAD. A sound archive isn't, and neither is a missing file.
@@ -468,25 +384,34 @@ void TestImagesThatRevosf2CantRead()
 
 void TestGameOutputFolders()
 {
-    // A game's output folder is beside the game. It takes the name of the game's folder, or of the image without its
+    // A game's output folder is beside the game. Its name is the name of the game folder, or of the image without its
     // extension. A folder given with a separator at its end is the same game.
     const xsflib::testing::TempFolder temp("revosf2_test_output");
     const std::filesystem::path& folder = temp.Path();
     std::filesystem::create_directories(folder / "Game");
     WriteBytes(folder / "game.nkit.iso", EncryptedWiiImage());
 
-    const std::filesystem::path game = revosf2::GamePath(folder / "Game" / "");
-    const std::filesystem::path image = revosf2::GamePath(folder / "game.nkit.iso");
+    const std::filesystem::path game = xsflib::rip::InputPath(xsflib::Utf8(folder / "Game" / ""));
+    const std::filesystem::path image = xsflib::rip::InputPath(xsflib::Utf8(folder / "game.nkit.iso"));
     const std::filesystem::path game_output = revosf2::GameOutputFolder(game);
     const std::filesystem::path image_output = revosf2::GameOutputFolder(image);
 
-    XSFLIB_CHECK(game.is_absolute() && game == revosf2::GamePath(folder / "Game"));
+    XSFLIB_CHECK(game.is_absolute() && game == xsflib::rip::InputPath(xsflib::Utf8(folder / "Game")));
     XSFLIB_CHECK(game_output == game.parent_path() / "Game_revosf2");
     XSFLIB_CHECK(image_output == image.parent_path() / "game.nkit_revosf2");
+
+    // A folder keeps the dots in its name. A character that names can't contain on Windows becomes '_'. The image with
+    // the '?' isn't written: a path that isn't a folder is named without the extension.
+    std::filesystem::create_directories(folder / "Game v1.2");
+    const std::filesystem::path dotted = xsflib::rip::InputPath(xsflib::Utf8(folder / "Game v1.2"));
+    const std::filesystem::path unsafe = xsflib::rip::InputPath(xsflib::Utf8(folder / "Disc?.iso"));
+
+    XSFLIB_CHECK(revosf2::GameOutputFolder(dotted) == dotted.parent_path() / "Game v1.2_revosf2");
+    XSFLIB_CHECK(revosf2::GameOutputFolder(unsafe) == unsafe.parent_path() / "Disc__revosf2");
 }
 
-// Convert each piece of several sequences in `archive` (ntdlib::FindSoundPieces) with `settings`, and check each
-// conversion (ntdlib::testing::CheckConversion). Print the number of pieces and of those that loop.
+// Converts each piece of several sequences in `archive` (ntdlib::FindSoundPieces) with `settings`, and checks each
+// conversion (ntdlib::testing::CheckConversion). Prints the number of pieces and of those that loop.
 void CheckPieces(const ntdlib::rsar::SoundArchive& archive, const Settings& settings)
 {
     const std::vector<ntdlib::SoundPiece> pieces = ntdlib::FindSoundPieces(archive, ntdlib::kMegaMan9Channels);
@@ -514,9 +439,9 @@ void CheckPieces(const ntdlib::rsar::SoundArchive& archive, const Settings& sett
     std::printf("archive: %zu pieces, %d loop\n", pieces.size(), looping);
 }
 
-// Convert every sequence and every piece of several sequences of the archive at `path`, and check each conversion
-// (ntdlib::testing::CheckArchive and CheckPieces). The main.dol at `dol` gives the build of NW4R SND. Without one, the
-// archive's version gives it.
+// Converts every sequence and every piece of several sequences of the archive at `path`, and checks each conversion
+// (ntdlib::testing::CheckArchive and CheckPieces). The main.dol at `dol` sets the build of NW4R SND. Without one, the
+// version of the archive sets it.
 void TestArchiveConvertsEverySequence(const char* path, const char* dol)
 {
     std::vector<uint8_t> bytes;
@@ -561,9 +486,9 @@ void TestArchiveConvertsEverySequence(const char* path, const char* dol)
     }
 }
 
-// Write a small JAudio game's sound files twice in `folder` (ntdlib's WriteGameFiles): loose in "archive", and in an
-// extracted disc, "disc", whose files/Audiores folder holds them. The disc has no sound archive (.brsar). Its sys
-// folder holds the files that LoadGame requires: a header with the Wii's magic word, a main.dol and an empty file
+// Writes the sound files of a small JAudio game twice in `folder` (ntdlib's WriteGameFiles): loose in "archive", and in
+// an extracted disc, "disc", whose files/Audiores folder contains them. The disc has no sound archive (.brsar). Its sys
+// folder contains the files that LoadGame requires: a header with the Wii's magic word, a main.dol and an empty file
 // system table.
 void WriteJAudioGames(const std::filesystem::path& folder)
 {
@@ -571,14 +496,9 @@ void WriteJAudioGames(const std::filesystem::path& folder)
     ntdlib::testing::jaudio_files::WriteGameFiles(folder / "archive");
     ntdlib::testing::jaudio_files::WriteGameFiles(folder / "disc" / "files" / "Audiores");
 
-    std::vector<uint8_t> header(ntdlib::disc::kHeaderSize);
-    xsflib::StoreBe32(header.data() + ntdlib::disc::kWiiMagicOffset, ntdlib::disc::kWiiMagic);
-    const std::vector<uint8_t> kDol = {0x00, 0x00, 0x01, 0x00};
-    const std::vector<uint8_t> kFst(12);
-    std::filesystem::create_directories(folder / "disc" / "sys");
-    WriteBytes(folder / "disc" / "sys" / "boot.bin", header);
-    WriteBytes(folder / "disc" / "sys" / "main.dol", kDol);
-    WriteBytes(folder / "disc" / "sys" / "fst.bin", kFst);
+    disc_files::WriteSystemFiles(folder / "disc", {.boot = disc_files::DiscHeader(ntdlib::disc::Console::kWii),
+                                                   .dol = {0x00, 0x00, 0x01, 0x00},
+                                                   .fst = std::vector<uint8_t>(12)});
 }
 
 } // namespace
@@ -601,8 +521,6 @@ int main(int argc, char** argv)
     TestCityFolkStepsItsGyroids();
     TestMarioKartSetsItsEffectsVariable();
     TestWeathersHaveNames();
-    TestPiecesAreFoundByTheirLabels();
-    TestNovember2008LowPassSteps();
     TestGamesAreFoldersImagesAndTitleFiles();
     TestImagesThatRevosf2CantRead();
     TestGameOutputFolders();

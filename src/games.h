@@ -20,21 +20,17 @@ namespace revosf2
 // how to extract the disc instead.
 ntdlib::disc::GameOptions DiscOptions();
 
-// True if `input` is a game rather than a sound archive: a folder that holds a game in a layout that LoadGame reads, a
-// disc image by its first bytes, or a file that LoadGame has a message for, such as a WAD (.wad) or one of a title's
-// files (.tmd, .app). LoadGame reads an extracted disc, with sys/main.dol and files/ directly or in a DATA folder, and
-// a title's folder, with the title's TMD (.tmd) and decrypted contents (.app). Any other folder isn't a game.
+// True if `input` is a game rather than a sound archive, by LoadGame's rules with DiscOptions (ntdlib::disc::IsGame): a
+// folder that contains an extracted disc or a title's TMD or contents, a disc image by its first bytes, or a file that
+// LoadGame has a message for, such as a WAD or one of a title's files. Any other folder isn't a game.
 bool IsGameInput(const std::filesystem::path& input);
 
 // The message for LoadGame's `error`. ntdlib's message for an encrypted game partition suggests an RVZ image. revosf2
 // doesn't read those. Its message says how to extract the disc instead.
 std::string GameMessage(const std::string& error);
 
-// The absolute path of the game at `input`, without the separator that ends a folder given as "game/".
-std::filesystem::path GamePath(const std::filesystem::path& input);
-
-// The output folder of the game at `path` (GamePath), beside it. Its name is the folder's name, or the image's name
-// without its extension, with "_revosf2" added.
+// The output folder of the game at `path`, beside it. `path` is xsflib's rip::InputPath of the input. The folder's name
+// is the game folder's name, or the image's name without its extension (rip::NameOfInput), with "_revosf2" added.
 std::filesystem::path GameOutputFolder(const std::filesystem::path& path);
 
 } // namespace revosf2

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// The sound library that a game's main.dol links, and the settings that it gives (see snd_build.h).
+// The sound library that a game's main.dol links, and the settings that play an archive (see snd_build.h).
 
 #include "snd_build.h"
 

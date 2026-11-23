@@ -3,10 +3,10 @@
 cmake_minimum_required(VERSION 3.20)
 # The version is revosf2 --version's, and the one in the file properties of the Windows program and the Info.plist of
 # the macOS app. A release changes it here and adds its notes in docs/release-notes/.
-project(revosf2 VERSION 1.6.0 LANGUAGES CXX)
+project(revosf2 VERSION 1.7.0 LANGUAGES CXX)
 
-# seqlib writes the MIDI and SoundFont files. xsflib holds the code that the converters share with the PSF players.
-# ntdlib holds the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.
+# seqlib writes the MIDI and SoundFont files. xsflib contains the code that the converters share with the PSF players.
+# ntdlib contains the Nintendo formats and sequence_export, the conversion of their sequences. All three are submodules.
 # xsflib's XsflibProject.cmake sets the C++ standard, a release build by default, the static C runtime and the compiler
 # options that keep the output the same on every platform. Among them, -ffp-contract=off keeps NW4R SND's
 # single-precision arithmetic without fused multiply-adds, and so the game's rounding. seqlib comes first: ntdlib's
@@ -19,20 +19,13 @@ xsflib_project(WARNINGS_ON_EVERY_TARGET)
 set(NTDLIB_SEQUENCE_EXPORT ON)
 xsflib_add_libraries(seqlib xsflib ntdlib)
 
-# clang-cl's /W4 warns when a designated initializer leaves out a field (-Wmissing-designated-field-initializers). The
-# Mac's -Wall -Wextra doesn't. revosf2 leaves out the fields whose default member initializers give their values.
-# Writing those values into each initializer would copy the defaults, and the copies could drift from them. The
-# libraries above keep the warning. The option reaches only the targets added below.
-if(MSVC)
-  add_compile_options(-Wno-missing-designated-field-initializers)
-endif()
-
 # ntdlib's disc library reads games: disc images, extracted discs and WiiWare titles, and the CPK archives in them. It
-# requires no other library. xsflib's rip library names each archive's folder in a game's output folder. ntdlib's
-# sequence_export_jaudio converts the games that play their sound with JAudio.
+# requires no other library. xsflib's rip library returns a game's path, its first bytes and the name of its output
+# folder. It also names each archive's folder in the game's output folder. ntdlib's sequence_export_jaudio converts the
+# games that play their sound with JAudio.
 add_library(revosf2_core STATIC src/games.cpp src/profiles.cpp src/snd_build.cpp)
 target_include_directories(revosf2_core PUBLIC src)
-target_link_libraries(revosf2_core PUBLIC ntdlib::disc ntdlib::rsar ntdlib::sequence_export xsflib::common)
+target_link_libraries(revosf2_core PUBLIC ntdlib::disc ntdlib::rsar ntdlib::sequence_export xsflib::common xsflib::rip)
 
 add_executable(revosf2 src/main.cpp)
 target_link_libraries(revosf2 PRIVATE revosf2_core ntdlib::sequence_export_jaudio xsflib::rip)
@@ -40,7 +33,7 @@ xsflib_add_version(revosf2 VERSION ${PROJECT_VERSION} DEFINE REVOSF2_VERSION
                    DESCRIPTION "Nintendo Wii sound archive converter" PRODUCT revosf2
                    COPYRIGHT "Copyright (c) 2026 the revosf2 authors. MIT licence.")
 
-# Windows: UTF-8 as the code page. An archive or a folder whose name the system's code page can't hold then opens.
+# Windows: UTF-8 as the code page. An archive or a folder whose name the system's code page can't represent then opens.
 xsflib_add_utf8_manifest(revosf2)
 
 # Finder cannot drop files onto a command-line executable. Package it in a macOS droplet app, with the version in its
@@ -52,9 +45,12 @@ xsflib_add_droplet_tool(revosf2 APP_NAME Revosf2 VERSION ${PROJECT_VERSION}
 include(CTest)
 if(BUILD_TESTING)
   # The program reports its version, and it rejects --var 32=1. -DREVOSF2_TEST_ARCHIVE=path/to/archive.brsar also
-  # converts and checks every sequence of an archive with tests/revosf2_test.cpp.
+  # converts and checks every sequence of an archive with tests/revosf2_test.cpp. revosf2_test --jaudio writes a Wii
+  # game that plays its music with JAudio: its start-up archive with its other sound files in jaudio/archive, and the
+  # same files in an extracted disc in jaudio/disc. revosf2 converts the start-up archive (revosf2_jaudio_archive).
   xsflib_add_converter_tests(revosf2 EXTENSION .brsar VERSION ${PROJECT_VERSION}
-                             LIBRARIES revosf2_core ntdlib::testing)
+                             LIBRARIES revosf2_core ntdlib::testing
+                             GENERATED_FILES jaudio GENERATED_ARCHIVE archive/test.baa)
   add_test(NAME revosf2_units COMMAND revosf2_test)
 
   # It rejects a --dol file without AX's microcode, before it converts anything.
@@ -71,20 +67,12 @@ if(BUILD_TESTING)
   # The messages that fail a conversion: a file that revosf2 can't read, or a count of failures.
   set(revosf2_fails "can't read| [1-9][0-9]* failed")
 
-  # It converts a Wii game that plays its music with JAudio: from the game's start-up archive with its other sound
-  # files beside it, and from an extracted disc that holds them and no sound archive. revosf2_test writes both. ctest
-  # ignores the exit code of a test with a pass expression. The conversions therefore also fail if revosf2 reports a
-  # failure.
-  set(revosf2_jaudio ${CMAKE_CURRENT_BINARY_DIR}/jaudio)
-  add_test(NAME revosf2_jaudio_files COMMAND revosf2_test --jaudio ${revosf2_jaudio})
-  add_test(NAME revosf2_jaudio_archive COMMAND revosf2 ${revosf2_jaudio}/archive/test.baa)
-  add_test(NAME revosf2_jaudio_game COMMAND revosf2 ${revosf2_jaudio}/disc)
-  set_tests_properties(revosf2_jaudio_files PROPERTIES FIXTURES_SETUP revosf2_jaudio)
-  set_tests_properties(revosf2_jaudio_archive PROPERTIES FIXTURES_REQUIRED revosf2_jaudio
-                       PASS_REGULAR_EXPRESSION "test\\.baa: 1 sequences -> .*test_revosf2"
-                       FAIL_REGULAR_EXPRESSION "${revosf2_fails}")
+  # It also converts the JAudio game from the extracted disc, which contains the game's sound files and no sound
+  # archive. ctest ignores the exit code of a test with a pass expression. The conversion therefore also fails if
+  # revosf2 reports a failure.
+  add_test(NAME revosf2_jaudio_game COMMAND revosf2 ./disc/. WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/jaudio)
   set_tests_properties(revosf2_jaudio_game PROPERTIES FIXTURES_REQUIRED revosf2_jaudio
-                       PASS_REGULAR_EXPRESSION "test\\.baa: 1 sequences -> .*disc_revosf2.test"
+                       PASS_REGULAR_EXPRESSION "test\\.baa: 1 sequences -> [^\n]*jaudio.disc_revosf2.test"
                        FAIL_REGULAR_EXPRESSION "${revosf2_fails}")
 
   # Load local_tests.cmake from each immediate subdirectory to register tests that use locally supplied files.

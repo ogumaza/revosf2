@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// The profiles of games whose code sets up some of their sounds as it starts them, beyond what the sound archive gives.
+// The profiles of games whose code sets up some of their sounds as it starts them, beyond what the sound archive sets.
 // A profile is for the releases whose main.dol it names by SHA-1. Animal Crossing: City Folk (USA) has one. Wii Play
 // has one for its USA release (Rev 1) and its European release. Wii Music and Mario Kart Wii each have one for their
 // USA and European releases. The Mii Channel (World, version 6) and the Wii Shop Channel (World, version 20) have one
@@ -61,7 +61,7 @@ std::optional<Weather> WeatherNamed(std::string_view name);
 Profile ProfileOf(std::span<const uint8_t> dol);
 
 // A sound that a game plays in more than one arrangement converts once in each. The sound's conversion plays the
-// arrangement that SetUpSound gives. A variant names another: the sound's label, the suffix that the variant's files
+// arrangement that SetUpSound sets up. A variant names another: the sound's label, the suffix that the variant's files
 // add to it, and the tracks that sound.
 struct Variant
 {
@@ -71,12 +71,15 @@ struct Variant
 };
 
 // The variants that `profile` converts, in the order that the conversions list them. City Folk's profile converts its
-// variants only in the arrangements that the game starts in. `chosen` is set when --weather or --museum gives others.
+// variants only in the arrangements that the game starts in. `chosen` is set when --weather or --museum selects others.
 std::vector<Variant> VariantsOf(Profile profile, bool chosen);
+
+// The variants of VariantsOf whose sound is labelled `sound`, in the same order.
+std::vector<Variant> VariantsOfSound(Profile profile, bool chosen, std::string_view sound);
 
 // Sets up the performance of the sound named `sound` as the game of `profile` starts it, in `arrangements`: the tracks
 // that sound, the sound's sends, and the changes of variables that the game's code makes while the sound plays. A sound
-// that the game starts as the archive gives it keeps `perform` as it is.
+// that the game starts as the archive sets it up keeps `perform` as it is.
 void SetUpSound(Profile profile, const Arrangements& arrangements, std::string_view sound,
                 ntdlib::sequence_export::PerformOptions& perform);
 
